@@ -10,32 +10,36 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
 
-// Engine runs a wizard Flow interactively.
-type Engine struct {
-	prompter    tui.Prompter
-	cache       *stepCache
-	collected   map[string]any
-	autoSkipped map[string]bool // steps auto-skipped due to empty loader results
-	rewindCount map[string]int  // tracks rewinds per step to detect infinite loops
-	current     int
-	writer      io.Writer
+// stepState represents the lifecycle state of a step during execution.
+type stepState int
+
+const (
+	statePending     stepState = iota // not yet visited
+	stateFixed                        // IsSet=true, value from flag/config
+	stateSkipped                      // ShouldSkip returned true
+	stateAutoSkipped                  // loader returned empty choices (optional step)
+	stateCompleted                    // user answered or default applied
+)
+
+// stepRuntime holds per-step execution state.
+type stepRuntime struct {
+	state       stepState
+	value       any      // the collected value
+	choices     []Choice // cached loader results (nil = not loaded)
+	rewindCount int      // how many times auto-rewind has targeted this step
 }
 
 // maxRewindsPerStep is the maximum number of times the engine will auto-rewind
 // to the same step before giving up with an error.
 const maxRewindsPerStep = 3
 
-// NewEngine creates a wizard engine with the given prompter.
-func NewEngine(prompter tui.Prompter, opts ...EngineOption) *Engine {
-	e := &Engine{
-		prompter:  prompter,
-		cache:     newStepCache(),
-		collected: make(map[string]any),
-	}
-	for _, opt := range opts {
-		opt(e)
-	}
-	return e
+// Engine runs a wizard Flow interactively.
+type Engine struct {
+	prompter tui.Prompter
+	flow     *Flow         // the flow being executed (set during Run)
+	steps    []stepRuntime // per-step runtime state, indexed same as flow.Steps
+	current  int
+	writer   io.Writer
 }
 
 // EngineOption configures the Engine.
@@ -46,6 +50,15 @@ func WithOutput(w io.Writer) EngineOption {
 	return func(e *Engine) { e.writer = w }
 }
 
+// NewEngine creates a wizard engine with the given prompter.
+func NewEngine(prompter tui.Prompter, opts ...EngineOption) *Engine {
+	e := &Engine{prompter: prompter}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
+}
+
 func (e *Engine) out() io.Writer {
 	if e.writer != nil {
 		return e.writer
@@ -54,183 +67,354 @@ func (e *Engine) out() io.Writer {
 }
 
 // Collected returns the values collected during the flow.
+// Only includes steps that completed or were pre-set via flags.
 func (e *Engine) Collected() map[string]any {
-	return e.collected
+	return e.buildCollected()
+}
+
+// buildCollected builds a map of step name → value for completed/fixed steps.
+func (e *Engine) buildCollected() map[string]any {
+	if e.flow == nil {
+		return make(map[string]any)
+	}
+	result := make(map[string]any)
+	for i, rt := range e.steps {
+		if rt.state == stateCompleted || rt.state == stateFixed {
+			result[e.flow.Steps[i].Name] = rt.value
+		}
+	}
+	return result
 }
 
 // Run executes the flow step by step.
 func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	e.current = 0
-	e.collected = make(map[string]any)
-	e.cache = newStepCache()
-	e.autoSkipped = make(map[string]bool)
-	e.rewindCount = make(map[string]int)
+	e.flow = flow
+	e.steps = make([]stepRuntime, len(flow.Steps))
+
 	for e.current < len(flow.Steps) {
 		step := flow.Steps[e.current]
+		col := e.buildCollected()
 
-		// Check ShouldSkip BEFORE IsSet — a skipped step must be cleared
-		// even if the user provided a value via flag/config.
-		if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
-			e.resetStep(step)
+		// ShouldSkip takes priority over IsSet.
+		if step.ShouldSkip != nil && step.ShouldSkip(col) {
+			e.transition(e.current, stateSkipped, nil)
 			e.current++
 			continue
 		}
 
 		if step.IsSet != nil && step.IsSet() {
-			// Propagate the pre-set value so downstream loaders/callbacks can see it.
-			if step.Value != nil {
-				val := step.Value()
-				// Validate preset values — bad flags/config should not be silently accepted.
-				if step.Validate != nil {
-					if err := step.Validate(val); err != nil {
-						return fmt.Errorf("step %q: preset value invalid: %w", step.Name, err)
-					}
-				}
-				e.collected[step.Name] = val
+			if err := e.handleFixed(step); err != nil {
+				return err
 			}
 			e.current++
 			continue
 		}
 
-		choices, err := e.loadStep(ctx, step)
+		choices, err := e.loadChoices(ctx, step)
 		if err != nil {
 			return fmt.Errorf("step %q: %w", step.Name, err)
 		}
 
 		if step.Loader != nil && len(choices) == 0 {
-			if handled, err := e.handleEmptyChoices(flow, step); err != nil {
+			handled, err := e.handleEmptyChoices(step)
+			if err != nil {
 				return err
-			} else if handled {
+			}
+			if handled {
 				continue
 			}
 		}
 
-		canGoBack := e.hasEditablePriorStep(flow)
-		value, err := e.prompt(ctx, step, choices, canGoBack)
-		if errors.Is(err, errGoBack) {
-			e.goBack(flow)
-			continue
+		if err := e.handlePrompt(ctx, step, choices); err != nil {
+			return err
 		}
-		// Distinguish real context cancellation from user Esc/Ctrl+C.
-		// If the parent context is done, abort immediately without mutating state.
-		if errors.Is(err, context.Canceled) {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			// User-initiated Esc — treat as back-navigation when possible.
-			if canGoBack {
-				e.goBack(flow)
-				continue
-			}
-			return fmt.Errorf("wizard cancelled")
-		}
-		if err != nil {
-			return fmt.Errorf("step %q: %w", step.Name, err)
-		}
-
-		// For non-required steps, use default if value is empty.
-		if !step.Required && isEmpty(value) && step.Default != nil {
-			value = step.Default(e.collected)
-		}
-
-		// Enforce required: reject empty values.
-		if step.Required && isEmpty(value) {
-			_, _ = fmt.Fprintf(e.out(), "  %s is required — please provide a value.\n", promptLabel(step))
-			continue // re-prompt same step
-		}
-
-		if step.Validate != nil {
-			if err := step.Validate(value); err != nil {
-				_, _ = fmt.Fprintf(e.out(), "  Validation error: %s\n", err)
-				continue // re-prompt same step
-			}
-		}
-
-		if step.Setter != nil {
-			step.Setter(value)
-		}
-		e.collected[step.Name] = value
-		delete(e.autoSkipped, step.Name)
-		delete(e.rewindCount, step.Name)
-		e.invalidateDownstream(flow, step.Name)
-		e.current++
 	}
 	return nil
 }
 
-func (e *Engine) loadStep(ctx context.Context, step Step) ([]Choice, error) {
-	if step.Loader == nil {
-		return nil, nil
+// handleFixed processes a step with IsSet=true.
+func (e *Engine) handleFixed(step Step) error {
+	if step.Value != nil {
+		val := step.Value()
+		if step.Validate != nil {
+			if err := step.Validate(val); err != nil {
+				return fmt.Errorf("step %q: preset value invalid: %w", step.Name, err)
+			}
+		}
+		e.steps[e.current].state = stateFixed
+		e.steps[e.current].value = val
+	} else {
+		e.steps[e.current].state = stateFixed
 	}
-	deps := e.depsFor(step)
-	if cached, ok := e.cache.get(step.Name, deps); ok {
-		return cached, nil
-	}
-	choices, err := step.Loader(ctx, e.prompter, e.collected)
-	if err != nil {
-		return nil, err
-	}
-	e.cache.set(step.Name, deps, choices)
-	return choices, nil
+	return nil
 }
 
 // handleEmptyChoices handles the case when a step's loader returns no choices.
-// Returns (true, nil) if the step was handled (skip or rewind), (false, nil) to
-// continue normal prompting, or (false, err) on unrecoverable error.
-func (e *Engine) handleEmptyChoices(flow *Flow, step Step) (bool, error) {
+func (e *Engine) handleEmptyChoices(step Step) (bool, error) {
+	col := e.buildCollected()
 	if !step.Required {
 		if step.Default != nil {
-			val := step.Default(e.collected)
+			val := step.Default(col)
 			if step.Setter != nil {
 				step.Setter(val)
 			}
-			e.collected[step.Name] = val
+			e.transition(e.current, stateAutoSkipped, val)
 		} else {
-			e.resetStep(step)
+			e.transition(e.current, stateAutoSkipped, nil)
 		}
-		e.autoSkipped[step.Name] = true
 		e.current++
 		return true, nil
 	}
+
 	if e.current == 0 {
 		return false, fmt.Errorf("step %q: no options available and cannot go back", step.Name)
 	}
-	e.rewindCount[step.Name]++
-	if e.rewindCount[step.Name] > maxRewindsPerStep {
+
+	e.steps[e.current].rewindCount++
+	if e.steps[e.current].rewindCount > maxRewindsPerStep {
 		return false, fmt.Errorf("step %q: no options available after %d attempts — the flow cannot proceed with current inputs", step.Name, maxRewindsPerStep)
 	}
+
 	_, _ = fmt.Fprintf(e.out(), "  No options available for %q — going back.\n", promptLabel(step))
-	if err := e.goBackToDependency(flow, step); err != nil {
+	if err := e.rewindToDependency(step); err != nil {
 		return false, fmt.Errorf("step %q: %w", step.Name, err)
 	}
 	return true, nil
 }
+
+// handlePrompt prompts the user and processes the result.
+func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) error {
+	canGoBack := e.hasEditablePriorStep()
+	value, err := e.prompt(ctx, step, choices, canGoBack)
+
+	if errors.Is(err, errGoBack) {
+		e.rewindOne()
+		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if canGoBack {
+			e.rewindOne()
+			return nil
+		}
+		return fmt.Errorf("wizard cancelled")
+	}
+	if err != nil {
+		return fmt.Errorf("step %q: %w", step.Name, err)
+	}
+
+	col := e.buildCollected()
+
+	// Apply default for non-required empty values.
+	if !step.Required && isEmpty(value) && step.Default != nil {
+		value = step.Default(col)
+	}
+
+	// Enforce required.
+	if step.Required && isEmpty(value) {
+		_, _ = fmt.Fprintf(e.out(), "  %s is required — please provide a value.\n", promptLabel(step))
+		return nil // re-prompt same step (current not advanced)
+	}
+
+	// Validate.
+	if step.Validate != nil {
+		if err := step.Validate(value); err != nil {
+			_, _ = fmt.Fprintf(e.out(), "  Validation error: %s\n", err)
+			return nil // re-prompt
+		}
+	}
+
+	// Complete the step.
+	if step.Setter != nil {
+		step.Setter(value)
+	}
+	e.transition(e.current, stateCompleted, value)
+	e.invalidateDownstream(e.current)
+	e.current++
+	return nil
+}
+
+// --- State transitions ---
+
+// transition sets a step to a new state, resetting the caller-bound variable if needed.
+func (e *Engine) transition(idx int, newState stepState, value any) {
+	rt := &e.steps[idx]
+	step := e.flow.Steps[idx]
+
+	// Call Resetter when clearing a step's value (moving to pending, skipped,
+	// or auto-skipped without a value). This ensures the caller-bound variable
+	// is always consistent with the engine state.
+	shouldReset := (newState == statePending || newState == stateSkipped) ||
+		(newState == stateAutoSkipped && value == nil)
+	if shouldReset && step.Resetter != nil {
+		step.Resetter()
+	}
+
+	rt.state = newState
+	rt.value = value
+	rt.choices = nil // invalidate cached choices
+}
+
+// resetRange resets all non-fixed steps in [from, to) to statePending.
+func (e *Engine) resetRange(from, to int) {
+	for i := from; i < to; i++ {
+		if e.steps[i].state == stateFixed {
+			continue // preserve preset values
+		}
+		e.transition(i, statePending, nil)
+	}
+}
+
+// --- Navigation ---
+
+// rewindOne goes back to the nearest editable prior step, clearing everything between.
+func (e *Engine) rewindOne() {
+	from := e.current
+	e.current--
+	for e.current >= 0 {
+		if e.isEditable(e.current) {
+			e.resetRange(e.current, from)
+			return
+		}
+		e.current--
+	}
+	e.current = 0
+}
+
+// rewindToDependency goes to the nearest editable dependency, or the earliest
+// editable step if deps are skipped. Returns error if no rewind target exists.
+func (e *Engine) rewindToDependency(current Step) error {
+	if len(current.DependsOn) == 0 {
+		e.rewindOne()
+		return nil
+	}
+
+	depSet := make(map[string]bool, len(current.DependsOn))
+	for _, d := range current.DependsOn {
+		depSet[d] = true
+	}
+
+	// Classify dependencies.
+	nearestEditable := -1
+	hasFixed := false
+	hasSkipped := false
+	for i := e.current - 1; i >= 0; i-- {
+		step := e.flow.Steps[i]
+		if !depSet[step.Name] {
+			continue
+		}
+		switch {
+		case e.steps[i].state == stateFixed:
+			hasFixed = true
+		case !e.isEditable(i):
+			hasSkipped = true
+		default:
+			if nearestEditable == -1 || i > nearestEditable {
+				nearestEditable = i
+			}
+		}
+	}
+
+	// Direct editable dependency found.
+	if nearestEditable >= 0 {
+		e.resetRange(nearestEditable, e.current)
+		e.current = nearestEditable
+		return nil
+	}
+
+	// All deps are fixed — unrecoverable.
+	if hasFixed && !hasSkipped {
+		return fmt.Errorf("step %q has no options available and all its dependencies %v are fixed (set via flag)", current.Name, current.DependsOn)
+	}
+
+	// Deps are skipped — find the earliest editable step that could change the outcome.
+	if hasSkipped {
+		for i := 0; i < e.current; i++ {
+			if e.isEditable(i) {
+				e.resetRange(i, e.current)
+				e.current = i
+				return nil
+			}
+		}
+		return fmt.Errorf("step %q has no options available and no editable prior step exists to change the outcome", current.Name)
+	}
+
+	// Fallback.
+	e.rewindOne()
+	return nil
+}
+
+// isEditable returns true if a step can be prompted (not fixed, not skipped, not auto-skipped).
+func (e *Engine) isEditable(idx int) bool {
+	step := e.flow.Steps[idx]
+	rt := e.steps[idx]
+	if step.IsSet != nil && step.IsSet() {
+		return false
+	}
+	col := e.buildCollected()
+	if step.ShouldSkip != nil && step.ShouldSkip(col) {
+		return false
+	}
+	if rt.state == stateAutoSkipped {
+		return false
+	}
+	return true
+}
+
+// hasEditablePriorStep returns true if there is at least one earlier editable step.
+func (e *Engine) hasEditablePriorStep() bool {
+	for i := e.current - 1; i >= 0; i-- {
+		if e.isEditable(i) {
+			return true
+		}
+	}
+	return false
+}
+
+// --- Choice loading ---
+
+func (e *Engine) loadChoices(ctx context.Context, step Step) ([]Choice, error) {
+	if step.Loader == nil {
+		return nil, nil
+	}
+
+	// Check cache.
+	rt := &e.steps[e.current]
+	if rt.choices != nil {
+		return rt.choices, nil
+	}
+
+	col := e.buildCollected()
+	choices, err := step.Loader(ctx, e.prompter, col)
+	if err != nil {
+		return nil, err
+	}
+	rt.choices = choices
+	return choices, nil
+}
+
+func (e *Engine) invalidateDownstream(changedIdx int) {
+	changedName := e.flow.Steps[changedIdx].Name
+	for i, step := range e.flow.Steps {
+		for _, dep := range step.DependsOn {
+			if dep == changedName {
+				e.steps[i].choices = nil // clear cached choices
+				break
+			}
+		}
+	}
+}
+
+// --- Prompting ---
 
 // errGoBack is a sentinel indicating the user chose to go back.
 var errGoBack = fmt.Errorf("go back")
 
 // backLabel is appended to Select/MultiSelect choices when back navigation is possible.
 const backLabel = "← Back"
-
-// hasEditablePriorStep returns true if there is at least one earlier step
-// that is not fixed (IsSet), not currently skipped (ShouldSkip), and not
-// auto-skipped due to empty loader results.
-func (e *Engine) hasEditablePriorStep(flow *Flow) bool {
-	for i := e.current - 1; i >= 0; i-- {
-		step := flow.Steps[i]
-		if step.IsSet != nil && step.IsSet() {
-			continue
-		}
-		if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
-			continue
-		}
-		if e.autoSkipped[step.Name] {
-			continue
-		}
-		return true
-	}
-	return false
-}
 
 func (e *Engine) prompt(ctx context.Context, step Step, choices []Choice, canGoBack bool) (any, error) {
 	switch step.Prompt {
@@ -256,7 +440,8 @@ func (e *Engine) promptSelect(ctx context.Context, step Step, choices []Choice, 
 	}
 	var opts []tui.SelectOption
 	if step.Default != nil {
-		if defVal, ok := step.Default(e.collected).(string); ok {
+		col := e.buildCollected() // safe: only needs completed values
+		if defVal, ok := step.Default(col).(string); ok {
 			for i, c := range choices {
 				if c.Value == defVal {
 					opts = append(opts, tui.WithSelectDefault(i))
@@ -285,7 +470,8 @@ func (e *Engine) promptMultiSelect(ctx context.Context, step Step, choices []Cho
 		opts = append(opts, tui.WithMinSelections(1))
 	}
 	if step.Default != nil {
-		if defVals, ok := step.Default(e.collected).([]string); ok && len(defVals) > 0 {
+		col := e.buildCollected()
+		if defVals, ok := step.Default(col).([]string); ok && len(defVals) > 0 {
 			valSet := make(map[string]bool, len(defVals))
 			for _, v := range defVals {
 				valSet[v] = true
@@ -320,7 +506,8 @@ func (e *Engine) promptMultiSelect(ctx context.Context, step Step, choices []Cho
 func (e *Engine) promptTextInput(ctx context.Context, step Step) (any, error) {
 	var opts []tui.TextInputOption
 	if step.Default != nil {
-		if d, ok := step.Default(e.collected).(string); ok && d != "" {
+		col := e.buildCollected()
+		if d, ok := step.Default(col).(string); ok && d != "" {
 			opts = append(opts, tui.WithDefault(d))
 		}
 	}
@@ -330,165 +517,15 @@ func (e *Engine) promptTextInput(ctx context.Context, step Step) (any, error) {
 func (e *Engine) promptConfirm(ctx context.Context, step Step) (any, error) {
 	var opts []tui.ConfirmOption
 	if step.Default != nil {
-		if d, ok := step.Default(e.collected).(bool); ok {
+		col := e.buildCollected()
+		if d, ok := step.Default(col).(bool); ok {
 			opts = append(opts, tui.WithConfirmDefault(d))
 		}
 	}
 	return e.prompter.Confirm(ctx, promptLabel(step), opts...)
 }
 
-func (e *Engine) goBack(flow *Flow) {
-	from := e.current
-	e.current--
-	for e.current >= 0 {
-		step := flow.Steps[e.current]
-		if step.IsSet != nil && step.IsSet() {
-			e.current--
-			continue
-		}
-		if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
-			e.current--
-			continue
-		}
-		if e.autoSkipped[step.Name] {
-			e.current--
-			continue
-		}
-		// Clear the destination step and all steps after it up to where we came from.
-		// Skip fixed (IsSet) steps — their values must be preserved.
-		for j := e.current; j < from; j++ {
-			s := flow.Steps[j]
-			if s.IsSet != nil && s.IsSet() {
-				continue
-			}
-			e.resetStep(s)
-		}
-		return
-	}
-	e.current = 0
-}
-
-// goBackToDependency rewinds to the nearest editable step listed in the current
-// step's DependsOn. Returns error only if ALL dependencies are fixed (IsSet).
-func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
-	if len(current.DependsOn) == 0 {
-		e.goBack(flow)
-		return nil
-	}
-
-	depSet := make(map[string]bool, len(current.DependsOn))
-	for _, d := range current.DependsOn {
-		depSet[d] = true
-	}
-
-	// Scan all dependency steps, collect editable ones.
-	// Skip deps that are fixed (IsSet) or currently hidden (ShouldSkip).
-	nearestEditable := -1
-	hasFixedDep := false
-	hasSkippedDep := false
-	for i := e.current - 1; i >= 0; i-- {
-		step := flow.Steps[i]
-		if !depSet[step.Name] {
-			continue
-		}
-		if step.IsSet != nil && step.IsSet() {
-			hasFixedDep = true
-			continue // fixed via flag
-		}
-		if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
-			hasSkippedDep = true
-			continue // currently hidden — rewinding here would just skip again
-		}
-		if e.autoSkipped[step.Name] {
-			hasSkippedDep = true
-			continue // auto-skipped due to empty loader — not editable
-		}
-		if nearestEditable == -1 || i > nearestEditable {
-			nearestEditable = i
-		}
-	}
-	_ = hasSkippedDep // used in allFixed check below
-	allFixed := hasFixedDep && !hasSkippedDep && nearestEditable < 0
-
-	if nearestEditable >= 0 {
-		// Clear everything from the editable dep up to current, skipping fixed steps.
-		for j := nearestEditable; j < e.current; j++ {
-			s := flow.Steps[j]
-			if s.IsSet != nil && s.IsSet() {
-				continue
-			}
-			e.resetStep(s)
-		}
-		e.current = nearestEditable
-		return nil
-	}
-
-	// No editable dependency found. If all are truly fixed (IsSet), error out.
-	if allFixed {
-		return fmt.Errorf("step %q has no options available and all its dependencies %v are fixed (set via flag)", current.Name, current.DependsOn)
-	}
-
-	// Dependencies are currently skipped. Find the earliest editable step
-	// that could change the skip condition.
-	if hasSkippedDep {
-		for i := 0; i < e.current; i++ {
-			step := flow.Steps[i]
-			if step.IsSet != nil && step.IsSet() {
-				continue
-			}
-			if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
-				continue
-			}
-			if e.autoSkipped[step.Name] {
-				continue
-			}
-			// Found the earliest editable step — rewind to it, skipping fixed steps.
-			for j := i; j < e.current; j++ {
-				s := flow.Steps[j]
-				if s.IsSet != nil && s.IsSet() {
-					continue
-				}
-				e.resetStep(s)
-			}
-			e.current = i
-			return nil
-		}
-		// All steps before current are fixed or skipped — no rewind target.
-		return fmt.Errorf("step %q has no options available and no editable prior step exists to change the outcome", current.Name)
-	}
-
-	// No dependencies matched at all — should not happen, but fail safely.
-	return fmt.Errorf("step %q has no options available and cannot go back", current.Name)
-}
-
-func (e *Engine) invalidateDownstream(flow *Flow, changedStep string) {
-	for _, step := range flow.Steps {
-		for _, dep := range step.DependsOn {
-			if dep == changedStep {
-				e.cache.invalidate(step.Name)
-				break
-			}
-		}
-	}
-}
-
-func (e *Engine) depsFor(step Step) map[string]any {
-	deps := make(map[string]any, len(step.DependsOn))
-	for _, name := range step.DependsOn {
-		if v, ok := e.collected[name]; ok {
-			deps[name] = v
-		}
-	}
-	return deps
-}
-
-// resetStep clears a step's value from collected and calls its Resetter.
-func (e *Engine) resetStep(step Step) {
-	delete(e.collected, step.Name)
-	if step.Resetter != nil {
-		step.Resetter()
-	}
-}
+// --- Utilities ---
 
 // promptLabel returns the display text for a step, falling back to Name if Description is empty.
 func promptLabel(step Step) string {
