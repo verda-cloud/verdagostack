@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -14,15 +16,35 @@ type Engine struct {
 	cache     *stepCache
 	collected map[string]any
 	current   int
+	writer    io.Writer
 }
 
 // NewEngine creates a wizard engine with the given prompter.
-func NewEngine(prompter tui.Prompter) *Engine {
-	return &Engine{
+func NewEngine(prompter tui.Prompter, opts ...EngineOption) *Engine {
+	e := &Engine{
 		prompter:  prompter,
 		cache:     newStepCache(),
 		collected: make(map[string]any),
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
+}
+
+// EngineOption configures the Engine.
+type EngineOption func(*Engine)
+
+// WithOutput sets the writer for engine messages (defaults to os.Stderr).
+func WithOutput(w io.Writer) EngineOption {
+	return func(e *Engine) { e.writer = w }
+}
+
+func (e *Engine) out() io.Writer {
+	if e.writer != nil {
+		return e.writer
+	}
+	return os.Stderr
 }
 
 // Collected returns the values collected during the flow.
@@ -55,6 +77,8 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			if e.current == 0 {
 				return fmt.Errorf("step %q: no options available and cannot go back", step.Name)
 			}
+			// Show message so the user knows why they're going back.
+			_, _ = fmt.Fprintf(e.out(), "  No options available for %q — going back.\n", step.Description)
 			e.goBack(flow)
 			continue
 		}

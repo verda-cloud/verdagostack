@@ -36,7 +36,9 @@ var (
 			{Label: "US East (us-east-1)", Value: "us-east-1"},
 			{Label: "EU West (eu-west-1)", Value: "eu-west-1"},
 		},
-		"dev": {}, // empty — will trigger auto-back
+		"dev": {
+			{Label: "Local (localhost)", Value: "localhost"},
+		},
 	}
 
 	// Instance sizes available per region.
@@ -53,6 +55,9 @@ var (
 		},
 		"ap-southeast-1": {
 			{Label: "Small (2 vCPU, 4GB)", Value: "small"},
+		},
+		"localhost": {
+			{Label: "Tiny (1 vCPU, 1GB)", Value: "tiny"},
 		},
 	}
 
