@@ -63,7 +63,7 @@ func TestApply_NoopMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply(noop) failed: %v", err)
 	}
-	defer providers.Shutdown(context.Background())
+	defer func() { _ = providers.Shutdown(context.Background()) }()
 
 	if providers.tracerProvider == nil {
 		t.Error("tracerProvider should not be nil in noop mode")
@@ -79,7 +79,7 @@ func TestApply_PrometheusMode_NoEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply(prometheus) failed: %v", err)
 	}
-	defer providers.Shutdown(context.Background())
+	defer func() { _ = providers.Shutdown(context.Background()) }()
 
 	if providers.tracerProvider == nil {
 		t.Error("tracerProvider should not be nil")
@@ -95,7 +95,7 @@ func TestApply_SetsGlobalProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply failed: %v", err)
 	}
-	defer providers.Shutdown(context.Background())
+	defer func() { _ = providers.Shutdown(context.Background()) }()
 
 	tp := otel.GetTracerProvider()
 	if tp == nil {

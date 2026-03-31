@@ -137,12 +137,12 @@ func TestServe_GracefulStopError(t *testing.T) {
 }
 
 func TestProtocolName(t *testing.T) {
-	plain := &http.Server{}
+	plain := &http.Server{ReadHeaderTimeout: time.Second} //nolint:gosec // test only
 	if name := protocolName(plain); name != "http" {
 		t.Errorf("expected 'http', got %q", name)
 	}
 
-	secure := &http.Server{TLSConfig: &tls.Config{}}
+	secure := &http.Server{TLSConfig: &tls.Config{}, ReadHeaderTimeout: time.Second} //nolint:gosec // test only
 	if name := protocolName(secure); name != "https" {
 		t.Errorf("expected 'https', got %q", name)
 	}

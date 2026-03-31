@@ -31,7 +31,7 @@ func TestCockroachDBOptions_DSN(t *testing.T) {
 		Database: "billing",
 		SSLMode:  "disable",
 	}
-	want := "postgresql://root:pass@crdb.example.com:26257/billing?sslmode=disable"
+	want := "postgresql://root:pass@crdb.example.com:26257/billing?sslmode=disable" //nolint:gosec // test fixture
 	if got := opts.DSN(); got != want {
 		t.Errorf("DSN mismatch:\n got: %s\nwant: %s", got, want)
 	}

@@ -161,9 +161,9 @@ func TestW_ContextExtraction(t *testing.T) {
 		return ""
 	}
 
-	ctx := context.WithValue(context.Background(), "rid", "abc-123")
+	ctx := context.WithValue(context.Background(), "rid", "abc-123") //nolint:staticcheck // test matches extractor key type
 	l.W(ctx).Infow("handled")
-	l.W(ctx).(interface{ Sync() }).Sync()
+	_ = l.z.Sync()
 
 	m := parseLine(t, lastLine(&buf))
 	if m["request.id"] != "abc-123" {
@@ -177,7 +177,7 @@ func TestW_EmptyContextValue_OmitsField(t *testing.T) {
 	l.contextExtractors["trace.id"] = func(ctx context.Context) string { return "" }
 
 	l.W(context.Background()).Infow("no trace")
-	l.z.Sync()
+	_ = l.z.Sync()
 
 	m := parseLine(t, lastLine(&buf))
 	if _, exists := m["trace.id"]; exists {

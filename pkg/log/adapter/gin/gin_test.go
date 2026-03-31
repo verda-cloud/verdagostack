@@ -29,7 +29,6 @@ type recorder struct {
 	entries []entry
 }
 
-func (r *recorder) reset() { r.entries = nil }
 func (r *recorder) Debugf(f string, a ...any) {
 	r.entries = append(r.entries, entry{level: "debug", format: f, args: a})
 }
@@ -107,7 +106,7 @@ func TestWriter_Write_ErrorLevel(t *testing.T) {
 	rec := &recorder{}
 	w := Writer(rec, LevelError)
 
-	w.Write([]byte("something broke"))
+	_, _ = w.Write([]byte("something broke"))
 	if rec.lastEntry().level != "error" {
 		t.Errorf("expected level 'error', got %q", rec.lastEntry().level)
 	}
@@ -117,7 +116,7 @@ func TestWriter_Write_DebugLevel(t *testing.T) {
 	rec := &recorder{}
 	w := Writer(rec, LevelDebug)
 
-	w.Write([]byte("debug line"))
+	_, _ = w.Write([]byte("debug line"))
 	if rec.lastEntry().level != "debug" {
 		t.Errorf("expected level 'debug', got %q", rec.lastEntry().level)
 	}
@@ -127,7 +126,7 @@ func TestWriter_Write_WarnLevel(t *testing.T) {
 	rec := &recorder{}
 	w := Writer(rec, LevelWarn)
 
-	w.Write([]byte("warn line"))
+	_, _ = w.Write([]byte("warn line"))
 	if rec.lastEntry().level != "warn" {
 		t.Errorf("expected level 'warn', got %q", rec.lastEntry().level)
 	}
@@ -137,7 +136,7 @@ func TestWriter_Write_TrimsTrailingNewline(t *testing.T) {
 	rec := &recorder{}
 	w := Writer(rec, LevelInfo)
 
-	w.Write([]byte("no trailing newline\n\n"))
+	_, _ = w.Write([]byte("no trailing newline\n\n"))
 	if len(rec.entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(rec.entries))
 	}
@@ -147,7 +146,7 @@ func TestWriter_Write_EmptySkipped(t *testing.T) {
 	rec := &recorder{}
 	w := Writer(rec, LevelInfo)
 
-	w.Write([]byte("\n"))
+	_, _ = w.Write([]byte("\n"))
 	if len(rec.entries) != 0 {
 		t.Error("empty (newline-only) writes should be skipped")
 	}
@@ -159,7 +158,7 @@ func TestWriter_AsGinDefaultWriter(t *testing.T) {
 	defer func() { ginfw.DefaultWriter = nil }()
 
 	// Writing through gin's default writer should reach our logger
-	ginfw.DefaultWriter.Write([]byte("test via gin.DefaultWriter"))
+	_, _ = ginfw.DefaultWriter.Write([]byte("test via gin.DefaultWriter"))
 	if len(rec.entries) == 0 {
 		t.Error("expected log entry from gin.DefaultWriter")
 	}
@@ -411,7 +410,7 @@ func TestWriter_Integration_BytesBuffer(t *testing.T) {
 
 	// Write to both
 	multi := multiWriter(&buf, w)
-	multi.Write([]byte("dual output"))
+	_, _ = multi.Write([]byte("dual output"))
 
 	if buf.String() != "dual output" {
 		t.Errorf("expected buffer to contain 'dual output', got %q", buf.String())
@@ -430,6 +429,6 @@ func multiWriter(a, b interface{ Write([]byte) (int, error) }) *dualWriter {
 }
 
 func (d *dualWriter) Write(p []byte) (int, error) {
-	d.a.Write(p)
+	_, _ = d.a.Write(p)
 	return d.b.Write(p)
 }

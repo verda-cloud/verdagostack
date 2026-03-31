@@ -113,7 +113,7 @@ func TestRetry_HTTPCall(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"status":"ok"}`)
+		_, _ = fmt.Fprint(w, `{"status":"ok"}`)
 	}))
 	defer srv.Close()
 
@@ -123,7 +123,7 @@ func TestRetry_HTTPCall(t *testing.T) {
 		if err != nil {
 			return false, nil // transient network error, retry
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode >= 500 {
 			return false, nil // server error, retry
@@ -159,7 +159,7 @@ func TestRetry_HTTPCall_PermanentError(t *testing.T) {
 		if err != nil {
 			return false, nil
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode == http.StatusUnauthorized {
 			return false, fmt.Errorf("401 unauthorized: abort retry")
@@ -194,7 +194,7 @@ func TestPollImmediate_WaitForHealthy(t *testing.T) {
 		if err != nil {
 			return false, nil
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return resp.StatusCode == http.StatusOK, nil
 	})
 

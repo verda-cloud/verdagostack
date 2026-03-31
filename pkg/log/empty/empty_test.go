@@ -8,7 +8,7 @@ import (
 )
 
 func TestEmptyLogger_ImplementsInterface(t *testing.T) {
-	var logger log.Logger = NewLogger()
+	var logger log.Logger = NewLogger() //nolint:staticcheck // explicit interface check
 	if logger == nil {
 		t.Fatal("NewLogger() returned nil")
 	}
