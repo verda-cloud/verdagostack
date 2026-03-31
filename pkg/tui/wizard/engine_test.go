@@ -751,3 +751,194 @@ func TestEngine_NilSetter_NosPanic(t *testing.T) {
 		t.Errorf("expected collected value 'a', got %v", engine.Collected()["temp"])
 	}
 }
+
+func TestEngine_ResetterCalledOnBack(t *testing.T) {
+	var category, contract string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "category",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "On-Demand", Value: "on-demand"},
+					Choice{Label: "Spot", Value: "spot"},
+				),
+				Setter:   func(v any) { category = v.(string) },
+				Resetter: func() { category = "" },
+			},
+			{
+				Name:       "contract",
+				Prompt:     SelectPrompt,
+				Required:   false,
+				Default:    func(_ map[string]any) any { return "PAY_AS_YOU_GO" },
+				ShouldSkip: func(c map[string]any) bool { return c["category"] == "spot" },
+				Loader:     StaticChoices(Choice{Label: "Monthly", Value: "monthly"}),
+				Setter:     func(v any) { contract = v.(string) },
+				Resetter:   func() { contract = "" },
+			},
+		},
+	}
+
+	// 1: on-demand (idx 0) → contract shows → monthly (idx 0)
+	// Then flow completes with contract="monthly"
+	// Now test: pick on-demand, pick contract, go back, pick spot → contract should be reset
+	p := tuitesting.New().
+		AddSelect(0). // category: on-demand
+		AddSelect(0)  // contract: monthly
+
+	engine := NewEngine(p)
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if contract != "monthly" {
+		t.Errorf("expected 'monthly', got %q", contract)
+	}
+
+	// Second run: pick on-demand, then go back from contract, pick spot → contract skipped & reset
+	contract = "stale-value" // simulate stale state
+	p2 := tuitesting.New().
+		AddSelect(0). // category: on-demand
+		AddSelect(1). // contract: ← Back
+		AddSelect(1)  // category: spot (contract will be skipped)
+
+	engine2 := NewEngine(p2)
+	err = engine2.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if category != "spot" {
+		t.Errorf("expected 'spot', got %q", category)
+	}
+	// contract Resetter should NOT have been called by engine2 since it was never set in this run.
+	// But the Setter was never called either, so contract keeps the "stale-value" from before.
+	// The key point: engine2.Collected() should NOT have "contract".
+	if _, exists := engine2.Collected()["contract"]; exists {
+		t.Error("contract should not be in collected — step was skipped")
+	}
+}
+
+func TestEngine_SkipClearsStaleValue(t *testing.T) {
+	var contract string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "category",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "On-Demand", Value: "on-demand"},
+					Choice{Label: "Spot", Value: "spot"},
+				),
+				Setter: func(v any) {},
+			},
+			{
+				Name:       "contract",
+				Prompt:     SelectPrompt,
+				Required:   false,
+				ShouldSkip: func(c map[string]any) bool { return c["category"] == "spot" },
+				Loader:     StaticChoices(Choice{Label: "Monthly", Value: "monthly"}),
+				Setter:     func(v any) { contract = v.(string) },
+				Resetter:   func() { contract = "" },
+			},
+			{
+				Name:     "done",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "OK", Value: "ok"}),
+				Setter:   func(v any) {},
+			},
+		},
+	}
+
+	// Pick on-demand → contract=monthly → done
+	// Then go back from done to contract, back to category, pick spot → contract should be reset
+	p := tuitesting.New().
+		AddSelect(0). // category: on-demand
+		AddSelect(0). // contract: monthly
+		AddSelect(1). // done: ← Back
+		AddSelect(1). // contract: ← Back
+		AddSelect(1). // category: spot (contract skipped, resetter called)
+		AddSelect(0)  // done: OK
+
+	engine := NewEngine(p, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if contract != "" {
+		t.Errorf("expected contract reset to empty, got %q", contract)
+	}
+}
+
+func TestEngine_FixedDependency_ReturnsError(t *testing.T) {
+	fixedRegion := true
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				IsSet:    func() bool { return fixedRegion },
+				Loader:   StaticChoices(Choice{Label: "A", Value: "a"}),
+				Setter:   func(v any) {},
+			},
+			{
+				Name:      "gpu",
+				Prompt:    SelectPrompt,
+				Required:  true,
+				DependsOn: []string{"region"},
+				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+					return []Choice{}, nil // always empty
+				},
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	p := tuitesting.New()
+	engine := NewEngine(p, WithOutput(io.Discard))
+
+	err := engine.Run(context.Background(), flow)
+	if err == nil {
+		t.Fatal("expected error for fixed dependency with empty choices")
+	}
+}
+
+func TestEngine_OptionalEmptyChoices_SkipsWithDefault(t *testing.T) {
+	var addon string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "addon",
+				Prompt:   SelectPrompt,
+				Required: false,
+				Default:  func(_ map[string]any) any { return "none" },
+				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+					return []Choice{}, nil // empty
+				},
+				Setter: func(v any) { addon = v.(string) },
+			},
+		},
+	}
+
+	p := tuitesting.New() // no prompts queued — step should be auto-skipped
+	engine := NewEngine(p)
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if addon != "none" {
+		t.Errorf("expected 'none', got %q", addon)
+	}
+}

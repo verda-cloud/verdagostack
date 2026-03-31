@@ -41,6 +41,7 @@ type Step struct {
 	Loader      LoaderFunc
 	Validate    func(value any) error
 	Setter      func(value any)
+	Resetter    func() // Called when step value is cleared (back/skip). Resets the bound variable.
 	IsSet       func() bool
 	DependsOn   []string
 }

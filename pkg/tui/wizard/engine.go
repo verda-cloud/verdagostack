@@ -64,6 +64,10 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		}
 
 		if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
+			// Clear any stale value from a previous pass through this step.
+			if _, hadValue := e.collected[step.Name]; hadValue {
+				e.resetStep(step)
+			}
 			e.current++
 			continue
 		}
@@ -73,12 +77,26 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			return fmt.Errorf("step %q: %w", step.Name, err)
 		}
 
-		if step.Required && step.Loader != nil && len(choices) == 0 {
+		if step.Loader != nil && len(choices) == 0 {
+			if !step.Required {
+				// Optional step with empty choices — apply default and skip.
+				if step.Default != nil {
+					val := step.Default(e.collected)
+					if step.Setter != nil {
+						step.Setter(val)
+					}
+					e.collected[step.Name] = val
+				}
+				e.current++
+				continue
+			}
 			if e.current == 0 {
 				return fmt.Errorf("step %q: no options available and cannot go back", step.Name)
 			}
 			_, _ = fmt.Fprintf(e.out(), "  No options available for %q — going back.\n", step.Description)
-			e.goBackToDependency(flow, step)
+			if err := e.goBackToDependency(flow, step); err != nil {
+				return fmt.Errorf("step %q: %w", step.Name, err)
+			}
 			continue
 		}
 
@@ -216,7 +234,7 @@ func (e *Engine) goBack(flow *Flow) {
 			e.current--
 			continue
 		}
-		delete(e.collected, step.Name)
+		e.resetStep(step)
 		return
 	}
 	e.current = 0
@@ -224,38 +242,42 @@ func (e *Engine) goBack(flow *Flow) {
 
 // goBackToDependency rewinds to the nearest step listed in the current step's
 // DependsOn. This skips over intervening text/confirm steps so the user lands
-// on the step that actually controls the empty result. Falls back to goBack if
-// no dependency is found.
-func (e *Engine) goBackToDependency(flow *Flow, current Step) {
+// on the step that actually controls the empty result.
+// Returns error if all dependencies are fixed (IsSet) and cannot be changed.
+func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
 	if len(current.DependsOn) == 0 {
 		e.goBack(flow)
-		return
+		return nil
 	}
 
-	// Find the nearest dependency step by scanning backwards.
 	depSet := make(map[string]bool, len(current.DependsOn))
 	for _, d := range current.DependsOn {
 		depSet[d] = true
 	}
 
-	// Clear collected values for all steps between target and current.
+	// Scan backwards for an editable dependency.
 	for i := e.current - 1; i >= 0; i-- {
 		step := flow.Steps[i]
-		if step.IsSet != nil && step.IsSet() {
+		if !depSet[step.Name] {
 			continue
 		}
-		if depSet[step.Name] {
-			// Found the dependency — clear it and everything after it up to current.
-			for j := i; j < e.current; j++ {
-				delete(e.collected, flow.Steps[j].Name)
-			}
-			e.current = i
-			return
+		// Found a dependency — check if it's editable.
+		if step.IsSet != nil && step.IsSet() {
+			// This dependency is fixed via flag — can't change it.
+			// Return error so the wizard stops instead of looping.
+			return fmt.Errorf("step %q has no options available and its dependency %q is fixed (set via flag)", current.Name, step.Name)
 		}
+		// Editable dependency found — clear it and everything after up to current.
+		for j := i; j < e.current; j++ {
+			e.resetStep(flow.Steps[j])
+		}
+		e.current = i
+		return nil
 	}
 
-	// Dependency not found (shouldn't happen), fall back.
+	// No dependency found, fall back to regular goBack.
 	e.goBack(flow)
+	return nil
 }
 
 func (e *Engine) invalidateDownstream(flow *Flow, changedStep string) {
@@ -277,6 +299,14 @@ func (e *Engine) depsFor(step Step) map[string]any {
 		}
 	}
 	return deps
+}
+
+// resetStep clears a step's value from collected and calls its Resetter.
+func (e *Engine) resetStep(step Step) {
+	delete(e.collected, step.Name)
+	if step.Resetter != nil {
+		step.Resetter()
+	}
 }
 
 func choiceLabels(choices []Choice) []string {
