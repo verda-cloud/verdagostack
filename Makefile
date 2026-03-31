@@ -1,7 +1,7 @@
-# Verdastack Makefile
+# Verdagostack Makefile
 # ──────────────────────────────────────────────────────────────────────
 
-.PHONY: build test vet lint tag tag-list tag-delete help
+.PHONY: build test vet lint tag tag-list tag-delete release changelog help
 
 # ─── Build & Test ────────────────────────────────────────────────────
 
@@ -56,6 +56,41 @@ endif
 	git tag -d "$(VERSION)"
 	git push origin --delete "$(VERSION)"
 	@echo "✓ Tag $(VERSION) deleted."
+
+# ─── Release Management ─────────────────────────────────────────────
+#
+# Usage:
+#   make release VERSION=v0.2.0   # generate changelog and commit release
+#   make changelog                # preview unreleased changelog entries
+
+release: ## Prepare a new release: generate changelog and tag (VERSION required)
+ifndef VERSION
+	$(error VERSION is required. Usage: make release VERSION=v0.2.0)
+endif
+	@if ! echo "$(VERSION)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+		echo "Error: VERSION must be valid semver (e.g. v0.2.0)"; exit 1; \
+	fi
+	@if ! command -v git-cliff >/dev/null 2>&1; then \
+		echo "Error: git-cliff is not installed"; \
+		echo "Install: cargo install git-cliff  OR  brew install git-cliff"; \
+		exit 1; \
+	fi
+	@echo "→ Generating CHANGELOG.md with git-cliff..."
+	@git-cliff --tag $(VERSION) -o CHANGELOG.md
+	@echo "✓ Updated CHANGELOG.md"
+	@echo ""
+	@echo "Next steps:"
+	@echo "  1. Review CHANGELOG.md"
+	@echo "  2. git add CHANGELOG.md && git commit -m 'chore(release): prepare $(VERSION)'"
+	@echo "  3. make tag VERSION=$(VERSION)"
+
+changelog: ## Preview unreleased changelog entries (requires git-cliff)
+	@if ! command -v git-cliff >/dev/null 2>&1; then \
+		echo "Error: git-cliff is not installed"; \
+		echo "Install: cargo install git-cliff  OR  brew install git-cliff"; \
+		exit 1; \
+	fi
+	@git-cliff --unreleased
 
 # ─── Help ────────────────────────────────────────────────────────────
 
