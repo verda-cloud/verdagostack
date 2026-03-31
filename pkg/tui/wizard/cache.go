@@ -2,6 +2,7 @@ package wizard
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"sort"
 )
@@ -42,7 +43,9 @@ func cacheKey(stepName string, deps map[string]any) string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		_, _ = fmt.Fprintf(h, "%s=%v;", k, deps[k])
+		// Use JSON for lossless serialization — %v is ambiguous for slices/strings.
+		v, _ := json.Marshal(deps[k])
+		_, _ = fmt.Fprintf(h, "%s=%s;", k, v)
 	}
 	return fmt.Sprintf("%s:%x", stepName, h.Sum(nil)[:8])
 }

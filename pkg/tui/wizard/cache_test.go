@@ -55,3 +55,24 @@ func TestCache_Invalidate(t *testing.T) {
 		t.Error("expected image cache to still exist")
 	}
 }
+
+func TestCache_LosslessCacheKeys(t *testing.T) {
+	c := newStepCache()
+
+	// These two should NOT collide: ["a b"] vs ["a", "b"]
+	deps1 := map[string]any{"keys": []string{"a b"}}
+	deps2 := map[string]any{"keys": []string{"a", "b"}}
+
+	c.set("step", deps1, []Choice{{Value: "one"}})
+	c.set("step", deps2, []Choice{{Value: "two"}})
+
+	got1, ok1 := c.get("step", deps1)
+	got2, ok2 := c.get("step", deps2)
+
+	if !ok1 || !ok2 {
+		t.Fatal("expected both cache hits")
+	}
+	if got1[0].Value == got2[0].Value {
+		t.Error("cache keys collided — different dep values returned same result")
+	}
+}

@@ -55,6 +55,8 @@ func (e *Engine) Collected() map[string]any {
 // Run executes the flow step by step.
 func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	e.current = 0
+	e.collected = make(map[string]any)
+	e.cache = newStepCache()
 	for e.current < len(flow.Steps) {
 		step := flow.Steps[e.current]
 
@@ -69,7 +71,14 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		if step.IsSet != nil && step.IsSet() {
 			// Propagate the pre-set value so downstream loaders/callbacks can see it.
 			if step.Value != nil {
-				e.collected[step.Name] = step.Value()
+				val := step.Value()
+				// Validate preset values — bad flags/config should not be silently accepted.
+				if step.Validate != nil {
+					if err := step.Validate(val); err != nil {
+						return fmt.Errorf("step %q: preset value invalid: %w", step.Name, err)
+					}
+				}
+				e.collected[step.Name] = val
 			}
 			e.current++
 			continue

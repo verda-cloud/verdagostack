@@ -1399,3 +1399,75 @@ func TestEngine_SkippedDepChainRewindsToController(t *testing.T) {
 		t.Errorf("expected svc-name='myapp2', got %q", svcName)
 	}
 }
+
+func TestEngine_PresetValueValidated(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:   "replicas",
+				Prompt: TextInputPrompt,
+				IsSet:  func() bool { return true },
+				Value:  func() any { return "bad" },
+				Validate: func(v any) error {
+					if v.(string) == "bad" {
+						return fmt.Errorf("invalid replica count")
+					}
+					return nil
+				},
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	p := tuitesting.New()
+	engine := NewEngine(p, WithOutput(io.Discard))
+
+	err := engine.Run(context.Background(), flow)
+	if err == nil {
+		t.Fatal("expected validation error for preset value")
+	}
+}
+
+func TestEngine_RunClearsStateFromPreviousRun(t *testing.T) {
+	var val string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "item",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "A", Value: "a"}, Choice{Label: "B", Value: "b"}),
+				Setter:   func(v any) { val = v.(string) },
+			},
+		},
+	}
+
+	// First run: select A
+	p1 := tuitesting.New().AddSelect(0)
+	engine := NewEngine(p1, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("run 1: %v", err)
+	}
+	if val != "a" {
+		t.Errorf("run 1: expected 'a', got %q", val)
+	}
+
+	// Second run with same engine: select B
+	// Engine must use a new prompter since the old one is exhausted.
+	engine.prompter = tuitesting.New().AddSelect(1)
+	err = engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("run 2: %v", err)
+	}
+	if val != "b" {
+		t.Errorf("run 2: expected 'b', got %q", val)
+	}
+	// Collected should only have run 2's values.
+	if engine.Collected()["item"] != "b" {
+		t.Errorf("collected should be 'b', got %v", engine.Collected()["item"])
+	}
+}
