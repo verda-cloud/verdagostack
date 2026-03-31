@@ -1711,3 +1711,112 @@ func TestEngine_SelectDefaultForwarded(t *testing.T) {
 		t.Errorf("expected 'medium', got %q", val)
 	}
 }
+
+func TestEngine_GoBackClearsDownstreamCollected(t *testing.T) {
+	// A -> B -> C. Back from C should clear both B and C from collected.
+	var a, b, c string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "a",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "A1", Value: "a1"}, Choice{Label: "A2", Value: "a2"}),
+				Setter:   func(v any) { a = v.(string) },
+			},
+			{
+				Name:     "b",
+				Prompt:   TextInputPrompt,
+				Required: true,
+				Setter:   func(v any) { b = v.(string) },
+			},
+			{
+				Name:     "c",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "C1", Value: "c1"}),
+				Setter:   func(v any) { c = v.(string) },
+			},
+		},
+	}
+
+	// 1: A=A1, B="hello", C: ← Back → clears B and lands on B
+	// But goBack from C skips to B (text), so B and C should both be cleared
+	// 2: B="world", C=C1
+	p := tuitesting.New().
+		AddSelect(0).          // A: A1
+		AddTextInput("hello"). // B: hello
+		AddSelect(1).          // C: ← Back
+		AddTextInput("world"). // B: world
+		AddSelect(0)           // C: C1
+
+	engine := NewEngine(p, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a != "a1" {
+		t.Errorf("expected a='a1', got %q", a)
+	}
+	if b != "world" {
+		t.Errorf("expected b='world', got %q", b)
+	}
+	if c != "c1" {
+		t.Errorf("expected c='c1', got %q", c)
+	}
+}
+
+func TestEngine_SkippedDepWithFixedController_ErrorsNotLoops(t *testing.T) {
+	// env(fixed=dev) -> tls(skipped when env=dev) -> cert(dependsOn tls, empty)
+	// svc-name is editable but can't change env → should error, not loop to svc-name.
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:   "env",
+				Prompt: SelectPrompt,
+				IsSet:  func() bool { return true },
+				Value:  func() any { return "dev" },
+				Setter: func(v any) {},
+			},
+			{
+				Name:     "svc-name",
+				Prompt:   TextInputPrompt,
+				Required: true,
+				Setter:   func(v any) {},
+			},
+			{
+				Name:       "tls",
+				Prompt:     ConfirmPrompt,
+				Required:   true,
+				ShouldSkip: func(c map[string]any) bool { return c["env"] == "dev" },
+				Setter:     func(v any) {},
+			},
+			{
+				Name:      "cert",
+				Prompt:    SelectPrompt,
+				Required:  true,
+				DependsOn: []string{"tls"},
+				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+					return []Choice{}, nil
+				},
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	// Queue enough text inputs for the rewind guard to kick in.
+	p := tuitesting.New().
+		AddTextInput("svc1").
+		AddTextInput("svc2").
+		AddTextInput("svc3").
+		AddTextInput("svc4")
+	engine := NewEngine(p, WithOutput(io.Discard))
+
+	err := engine.Run(context.Background(), flow)
+	if err == nil {
+		t.Fatal("expected error, not infinite loop")
+	}
+}

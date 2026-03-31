@@ -16,9 +16,14 @@ type Engine struct {
 	cache       *stepCache
 	collected   map[string]any
 	autoSkipped map[string]bool // steps auto-skipped due to empty loader results
+	rewindCount map[string]int  // tracks rewinds per step to detect infinite loops
 	current     int
 	writer      io.Writer
 }
+
+// maxRewindsPerStep is the maximum number of times the engine will auto-rewind
+// to the same step before giving up with an error.
+const maxRewindsPerStep = 3
 
 // NewEngine creates a wizard engine with the given prompter.
 func NewEngine(prompter tui.Prompter, opts ...EngineOption) *Engine {
@@ -59,6 +64,7 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	e.collected = make(map[string]any)
 	e.cache = newStepCache()
 	e.autoSkipped = make(map[string]bool)
+	e.rewindCount = make(map[string]int)
 	for e.current < len(flow.Steps) {
 		step := flow.Steps[e.current]
 
@@ -110,6 +116,10 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			if e.current == 0 {
 				return fmt.Errorf("step %q: no options available and cannot go back", step.Name)
 			}
+			e.rewindCount[step.Name]++
+			if e.rewindCount[step.Name] > maxRewindsPerStep {
+				return fmt.Errorf("step %q: no options available after %d attempts — the flow cannot proceed with current inputs", step.Name, maxRewindsPerStep)
+			}
 			_, _ = fmt.Fprintf(e.out(), "  No options available for %q — going back.\n", promptLabel(step))
 			if err := e.goBackToDependency(flow, step); err != nil {
 				return fmt.Errorf("step %q: %w", step.Name, err)
@@ -158,6 +168,7 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		}
 		e.collected[step.Name] = value
 		delete(e.autoSkipped, step.Name)
+		delete(e.rewindCount, step.Name)
 		e.invalidateDownstream(flow, step.Name)
 		e.current++
 	}
@@ -312,6 +323,7 @@ func (e *Engine) promptConfirm(ctx context.Context, step Step) (any, error) {
 }
 
 func (e *Engine) goBack(flow *Flow) {
+	from := e.current
 	e.current--
 	for e.current >= 0 {
 		step := flow.Steps[e.current]
@@ -327,7 +339,10 @@ func (e *Engine) goBack(flow *Flow) {
 			e.current--
 			continue
 		}
-		e.resetStep(step)
+		// Clear the destination step and all steps after it up to where we came from.
+		for j := e.current; j < from; j++ {
+			e.resetStep(flow.Steps[j])
+		}
 		return
 	}
 	e.current = 0
