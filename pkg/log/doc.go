@@ -1,5 +1,5 @@
 // Package log provides a structured, leveled logging library for the
-// verdastack project, backed by go.uber.org/zap.
+// verdagostack project, backed by go.uber.org/zap.
 //
 // It exposes both printf-style (*f) and structured key-value (*w) methods at
 // every severity level (Debug, Info, Warn, Error, Panic, Fatal), a global

@@ -245,12 +245,12 @@ func TestMiddleware_IncludesUserAgent(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/ok", nil)
-	req.Header.Set("User-Agent", "verdastack-test/1.0")
+	req.Header.Set("User-Agent", "verdagostack-test/1.0")
 	r.ServeHTTP(w, req)
 
 	v, ok := rec.findKV("user_agent")
-	if !ok || v != "verdastack-test/1.0" {
-		t.Errorf("expected user_agent 'verdastack-test/1.0', got %v", v)
+	if !ok || v != "verdagostack-test/1.0" {
+		t.Errorf("expected user_agent 'verdagostack-test/1.0', got %v", v)
 	}
 }
 

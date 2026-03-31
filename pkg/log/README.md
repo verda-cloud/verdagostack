@@ -1,6 +1,6 @@
 # pkg/log
 
-Production-grade structured logging for verdastack, backed by [zap](https://github.com/uber-go/zap).
+Production-grade structured logging for verdagostack, backed by [zap](https://github.com/uber-go/zap).
 
 ## Features
 

@@ -50,7 +50,7 @@ func NewValkeyOptions() *ValkeyOptions {
 	return &ValkeyOptions{
 		Host:       "127.0.0.1",
 		Port:       6379,
-		ClientName: "verdastack",
+		ClientName: "verdagostack",
 		TTL:        24 * time.Hour,
 	}
 }

@@ -14,8 +14,8 @@ func TestValkeyOptions_Defaults(t *testing.T) {
 	if opts.Port != 6379 {
 		t.Errorf("expected port 6379, got %d", opts.Port)
 	}
-	if opts.ClientName != "verdastack" {
-		t.Errorf("expected client name verdastack, got %s", opts.ClientName)
+	if opts.ClientName != "verdagostack" {
+		t.Errorf("expected client name verdagostack, got %s", opts.ClientName)
 	}
 }
 

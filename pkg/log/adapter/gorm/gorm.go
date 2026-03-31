@@ -1,5 +1,5 @@
 // Package gorm provides a GORM logger adapter that delegates to a
-// verdastack log.Logger instance.
+// verdagostack log.Logger instance.
 package gorm
 
 import (
@@ -19,7 +19,7 @@ import (
 const defaultSlowThreshold = 200 * time.Millisecond
 
 // GormLogger implements gorm.io/gorm/logger.Interface by delegating to a
-// verdastack log.Logger.
+// verdagostack log.Logger.
 type GormLogger struct {
 	logger        log.Logger
 	level         gormlogger.LogLevel

@@ -1,5 +1,5 @@
 // Package db provides constructors for creating database and cache clients
-// used across the verdastack project.
+// used across the verdagostack project.
 //
 // Supported backends:
 //   - PostgreSQL (via GORM + pgx)

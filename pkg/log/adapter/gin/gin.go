@@ -1,5 +1,5 @@
 // Package gin provides a Gin framework adapter that routes Gin's request
-// logging and internal debug output through a verdastack log.Logger.
+// logging and internal debug output through a verdagostack log.Logger.
 //
 // Two integration points are provided:
 //

@@ -1,6 +1,6 @@
 # pkg/options
 
-Reusable, flag-driven configuration types for verdastack services.
+Reusable, flag-driven configuration types for verdagostack services.
 
 Every option struct implements the `IOptions` interface:
 

@@ -1,4 +1,4 @@
-// Package metrics provides a shared Prometheus metrics library for verdastack
+// Package metrics provides a shared Prometheus metrics library for verdagostack
 // applications. Metrics registered here appear on the /metrics endpoint served
 // by pkg/options.ObservabilityOptions (which reads from prometheus.DefaultGatherer).
 //

@@ -1,4 +1,4 @@
-// Command example demonstrates all major features of the verdastack pkg/log package.
+// Command example demonstrates all major features of the verdagostack pkg/log package.
 //
 // Run with:
 //
@@ -113,7 +113,7 @@ func main() {
 	// 9. Multi-output paths
 	// ----------------------------------------------------------------
 	fmt.Println("\n=== 9. Multi-output paths ===")
-	tmpFile := "/tmp/verdastack-log-example.log"
+	tmpFile := "/tmp/verdagostack-log-example.log"
 	multiOpts := &log.Options{
 		Level:       "info",
 		Format:      "json",

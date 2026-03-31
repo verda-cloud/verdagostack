@@ -16,7 +16,7 @@ Reusable step-by-step guides for common tasks live in `.ai/skills/`. Read the re
 
 | Skill | Path | When to use |
 |-------|------|-------------|
-| Log adapter | [.ai/skills/verdastack-log-adapter/SKILL.md](.ai/skills/verdastack-log-adapter/SKILL.md) | Creating a new framework adapter for `pkg/log` (e.g., integrating Redis, gRPC, or any third-party library with verdastack logging) |
+| Log adapter | [.ai/skills/verdagostack-log-adapter/SKILL.md](.ai/skills/verdagostack-log-adapter/SKILL.md) | Creating a new framework adapter for `pkg/log` (e.g., integrating Redis, gRPC, or any third-party library with verdagostack logging) |
 
 ## Conventions
 

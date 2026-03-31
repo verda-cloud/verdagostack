@@ -62,7 +62,7 @@ func (s *KratosServer) GracefulStop(ctx context.Context) error {
 	return nil
 }
 
-// NewKratosLogger creates a Kratos-compatible logger backed by the given verdastack Logger,
+// NewKratosLogger creates a Kratos-compatible logger backed by the given verdagostack Logger,
 // enriched with service metadata fields.
 func NewKratosLogger(logger log.Logger, id, name, version string) krtlog.Logger {
 	return krtlog.With(kratosadapter.New(logger),

@@ -12,7 +12,7 @@ func TestTracePlugin_ImplementsPlugin(t *testing.T) {
 
 func TestTracePlugin_Name(t *testing.T) {
 	p := TracePlugin{}
-	if name := p.Name(); name != "verdastack:trace" {
-		t.Errorf("expected name verdastack:trace, got %s", name)
+	if name := p.Name(); name != "verdagostack:trace" {
+		t.Errorf("expected name verdagostack:trace, got %s", name)
 	}
 }

@@ -35,24 +35,24 @@ go get github.com/verda-cloud/verdagostack/pkg/log
 | [pkg/util/stringsx](pkg/util/stringsx/) | String slice utilities — Diff, Unique, Contains, Filter, Reverse, base64 |
 | [pkg/version](pkg/version/) | Build-time version info via `-ldflags` with `--version` flag support |
 
-## Building Apps with verdastack
+## Building Apps with verdagostack
 
-AI coding skills are available to help scaffold complete applications following verdastack conventions. Install them once and your AI assistant (Cursor, Codex, Claude Code) can generate fully-wired services and CLI tools.
+AI coding skills are available to help scaffold complete applications following verdagostack conventions. Install them once and your AI assistant (Cursor, Codex, Claude Code) can generate fully-wired services and CLI tools.
 
 ### Available skills
 
 | Skill | What it does |
 |-------|-------------|
-| **verdastack-web-app** | Scaffold a Gin HTTP service with OTel, options pattern, typed handlers, and observability |
-| **verdastack-cli-app** | Scaffold a Cobra CLI tool with IOStreams, CommandGroups, and Complete/Validate/Run lifecycle |
+| **verdagostack-web-app** | Scaffold a Gin HTTP service with OTel, options pattern, typed handlers, and observability |
+| **verdagostack-cli-app** | Scaffold a Cobra CLI tool with IOStreams, CommandGroups, and Complete/Validate/Run lifecycle |
 
 ### Install (Cursor)
 
 From the root of this repo:
 
 ```bash
-cp -r .ai/skills/verdastack-web-app ~/.cursor/skills/
-cp -r .ai/skills/verdastack-cli-app ~/.cursor/skills/
+cp -r .ai/skills/verdagostack-web-app ~/.cursor/skills/
+cp -r .ai/skills/verdagostack-cli-app ~/.cursor/skills/
 ```
 
 The skills are stored under `~/.cursor/skills/` and activate automatically in any project.
@@ -62,8 +62,8 @@ The skills are stored under `~/.cursor/skills/` and activate automatically in an
 Copy the skills into your target project's `.ai/skills/` directory:
 
 ```bash
-cp -r .ai/skills/verdastack-web-app /path/to/your-app/.ai/skills/
-cp -r .ai/skills/verdastack-cli-app /path/to/your-app/.ai/skills/
+cp -r .ai/skills/verdagostack-web-app /path/to/your-app/.ai/skills/
+cp -r .ai/skills/verdagostack-cli-app /path/to/your-app/.ai/skills/
 ```
 
 Then reference them in your project's `AGENTS.md` (or `CLAUDE.md`) skills table.
@@ -72,7 +72,7 @@ Then reference them in your project's `AGENTS.md` (or `CLAUDE.md`) skills table.
 
 Once installed, just ask your AI assistant in your app project:
 
-- *"Create a new API server called payment-service using verdastack"* — triggers the web-app skill
+- *"Create a new API server called payment-service using verdagostack"* — triggers the web-app skill
 - *"Build a CLI tool for managing deployments"* — triggers the CLI-app skill
 
 See [goapp-demo](https://github.com/verda-cloud/goapp-demo) for a complete working example built with these patterns.

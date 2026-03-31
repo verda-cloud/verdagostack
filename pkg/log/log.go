@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// Logger defines the logging interface for the verdastack project.
+// Logger defines the logging interface for the verdagostack project.
 // It provides both printf-style (*f) and structured (*w) logging methods
 // at all standard severity levels.
 type Logger interface {

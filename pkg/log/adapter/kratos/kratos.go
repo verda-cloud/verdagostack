@@ -1,5 +1,5 @@
 // Package kratos provides a Kratos logger adapter that delegates to a
-// verdastack log.Logger instance.
+// verdagostack log.Logger instance.
 package kratos
 
 import (
@@ -11,7 +11,7 @@ import (
 )
 
 // KratosLogger implements github.com/go-kratos/kratos/v2/log.Logger
-// by delegating to a verdastack log.Logger.
+// by delegating to a verdagostack log.Logger.
 type KratosLogger struct {
 	logger log.Logger
 }

@@ -11,18 +11,18 @@ import (
 )
 
 const (
-	callbackBeforeName = "verdastack:before"
-	callbackAfterName  = "verdastack:after"
-	startTimeKey       = "_verdastack_start_time"
+	callbackBeforeName = "verdagostack:before"
+	callbackAfterName  = "verdagostack:after"
+	startTimeKey       = "_verdagostack_start_time"
 )
 
 // TracePlugin is a GORM plugin that measures SQL execution time and logs it
-// via the verdastack log package.
+// via the verdagostack log package.
 type TracePlugin struct{}
 
 var _ gorm.Plugin = (*TracePlugin)(nil)
 
-func (TracePlugin) Name() string { return "verdastack:trace" }
+func (TracePlugin) Name() string { return "verdagostack:trace" }
 
 func (TracePlugin) Initialize(db *gorm.DB) error {
 	_ = db.Callback().Create().Before("gorm:before_create").Register(callbackBeforeName, traceBefore)
