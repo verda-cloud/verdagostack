@@ -109,6 +109,15 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			e.goBack(flow)
 			continue
 		}
+		// Treat Esc/Ctrl+C (context.Canceled) as back-navigation on non-first steps.
+		// On the first step, it aborts the wizard.
+		if errors.Is(err, context.Canceled) {
+			if e.current > 0 {
+				e.goBack(flow)
+				continue
+			}
+			return fmt.Errorf("wizard cancelled")
+		}
 		if err != nil {
 			return fmt.Errorf("step %q: %w", step.Name, err)
 		}
@@ -258,25 +267,29 @@ func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
 	}
 
 	// Scan all dependency steps, collect editable ones.
+	// Skip deps that are fixed (IsSet) or currently hidden (ShouldSkip).
 	nearestEditable := -1
-	allFixed := true
+	hasFixedDep := false
+	hasSkippedDep := false
 	for i := e.current - 1; i >= 0; i-- {
 		step := flow.Steps[i]
 		if !depSet[step.Name] {
 			continue
 		}
 		if step.IsSet != nil && step.IsSet() {
-			continue // fixed — skip, but keep scanning for editable ones
+			hasFixedDep = true
+			continue // fixed via flag
 		}
-		allFixed = false
+		if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
+			hasSkippedDep = true
+			continue // currently hidden — rewinding here would just skip again
+		}
 		if nearestEditable == -1 || i > nearestEditable {
 			nearestEditable = i
 		}
 	}
-
-	if allFixed {
-		return fmt.Errorf("step %q has no options available and all its dependencies %v are fixed (set via flag)", current.Name, current.DependsOn)
-	}
+	_ = hasSkippedDep // used in allFixed check below
+	allFixed := hasFixedDep && !hasSkippedDep && nearestEditable < 0
 
 	if nearestEditable >= 0 {
 		// Clear everything from the editable dep up to current.
@@ -287,7 +300,15 @@ func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
 		return nil
 	}
 
-	// No dependency found in flow, fall back.
+	// No editable dependency found. If all are truly fixed (IsSet), error out.
+	// If some are just skipped (ShouldSkip), fall back to goBack() which will
+	// find the nearest editable step regardless of DependsOn.
+	if allFixed {
+		return fmt.Errorf("step %q has no options available and all its dependencies %v are fixed (set via flag)", current.Name, current.DependsOn)
+	}
+
+	// Dependencies exist but are currently skipped — fall back to regular goBack
+	// which will navigate past skipped steps to the nearest editable one.
 	e.goBack(flow)
 	return nil
 }

@@ -168,6 +168,7 @@ func main() {
 				// Skip TLS prompt for dev — always false.
 				ShouldSkip: func(c map[string]any) bool { return c["environment"] == "dev" },
 				Setter:     func(v any) { enableTLS = v.(bool) },
+				Resetter:   func() { enableTLS = false },
 			},
 			{
 				Name:        "replicas",
