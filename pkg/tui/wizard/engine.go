@@ -77,9 +77,8 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			if e.current == 0 {
 				return fmt.Errorf("step %q: no options available and cannot go back", step.Name)
 			}
-			// Show message so the user knows why they're going back.
 			_, _ = fmt.Fprintf(e.out(), "  No options available for %q — going back.\n", step.Description)
-			e.goBack(flow)
+			e.goBackToDependency(flow, step)
 			continue
 		}
 
@@ -92,17 +91,27 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			return fmt.Errorf("step %q: %w", step.Name, err)
 		}
 
+		// For non-required steps, use default if value is empty.
 		if !step.Required && isEmpty(value) && step.Default != nil {
 			value = step.Default(e.collected)
 		}
 
+		// Enforce required: reject empty values.
+		if step.Required && isEmpty(value) {
+			_, _ = fmt.Fprintf(e.out(), "  %s is required — please provide a value.\n", step.Description)
+			continue // re-prompt same step
+		}
+
 		if step.Validate != nil {
 			if err := step.Validate(value); err != nil {
-				return fmt.Errorf("step %q validation: %w", step.Name, err)
+				_, _ = fmt.Fprintf(e.out(), "  Validation error: %s\n", err)
+				continue // re-prompt same step
 			}
 		}
 
-		step.Setter(value)
+		if step.Setter != nil {
+			step.Setter(value)
+		}
 		e.collected[step.Name] = value
 		e.invalidateDownstream(flow, step.Name)
 		e.current++
@@ -155,7 +164,11 @@ func (e *Engine) prompt(ctx context.Context, step Step, choices []Choice) (any, 
 		if canGoBack {
 			labels = append(labels, backLabel)
 		}
-		indices, err := e.prompter.MultiSelect(ctx, step.Description, labels)
+		var msOpts []tui.MultiSelectOption
+		if step.Required {
+			msOpts = append(msOpts, tui.WithMinSelections(1))
+		}
+		indices, err := e.prompter.MultiSelect(ctx, step.Description, labels, msOpts...)
 		if err != nil {
 			return nil, err
 		}
@@ -207,6 +220,42 @@ func (e *Engine) goBack(flow *Flow) {
 		return
 	}
 	e.current = 0
+}
+
+// goBackToDependency rewinds to the nearest step listed in the current step's
+// DependsOn. This skips over intervening text/confirm steps so the user lands
+// on the step that actually controls the empty result. Falls back to goBack if
+// no dependency is found.
+func (e *Engine) goBackToDependency(flow *Flow, current Step) {
+	if len(current.DependsOn) == 0 {
+		e.goBack(flow)
+		return
+	}
+
+	// Find the nearest dependency step by scanning backwards.
+	depSet := make(map[string]bool, len(current.DependsOn))
+	for _, d := range current.DependsOn {
+		depSet[d] = true
+	}
+
+	// Clear collected values for all steps between target and current.
+	for i := e.current - 1; i >= 0; i-- {
+		step := flow.Steps[i]
+		if step.IsSet != nil && step.IsSet() {
+			continue
+		}
+		if depSet[step.Name] {
+			// Found the dependency — clear it and everything after it up to current.
+			for j := i; j < e.current; j++ {
+				delete(e.collected, flow.Steps[j].Name)
+			}
+			e.current = i
+			return
+		}
+	}
+
+	// Dependency not found (shouldn't happen), fall back.
+	e.goBack(flow)
 }
 
 func (e *Engine) invalidateDownstream(flow *Flow, changedStep string) {

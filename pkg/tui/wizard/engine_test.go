@@ -3,7 +3,7 @@ package wizard
 import (
 	"context"
 	"fmt"
-	"strings"
+	"io"
 	"testing"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
@@ -340,7 +340,9 @@ func TestEngine_EmptyRequired_AtFirstStep_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestEngine_ValidationError(t *testing.T) {
+func TestEngine_ValidationError_RepromptsUntilValid(t *testing.T) {
+	var size string
+
 	flow := &Flow{
 		Name: "test",
 		Steps: []Step{
@@ -349,25 +351,26 @@ func TestEngine_ValidationError(t *testing.T) {
 				Prompt:   TextInputPrompt,
 				Required: true,
 				Validate: func(v any) error {
-					if v.(string) == "" {
-						return fmt.Errorf("size cannot be empty")
+					if v.(string) == "bad" {
+						return fmt.Errorf("invalid size")
 					}
 					return nil
 				},
-				Setter: func(v any) {},
+				Setter: func(v any) { size = v.(string) },
 			},
 		},
 	}
 
-	p := tuitesting.New().AddTextInput("")
-	engine := NewEngine(p)
+	// First: "bad" (fails validation, re-prompt), second: "100" (passes)
+	p := tuitesting.New().AddTextInput("bad").AddTextInput("100")
+	engine := NewEngine(p, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
-	if err == nil {
-		t.Fatal("expected validation error")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "size cannot be empty") {
-		t.Errorf("unexpected error: %v", err)
+	if size != "100" {
+		t.Errorf("expected '100', got %q", size)
 	}
 }
 
@@ -623,5 +626,128 @@ func TestEngine_BackNotShownOnFirstStep(t *testing.T) {
 	}
 	if val != "a" {
 		t.Errorf("expected 'a', got %q", val)
+	}
+}
+
+func TestEngine_RequiredTextInput_RepromptsOnEmpty(t *testing.T) {
+	var name string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "name",
+				Prompt:   TextInputPrompt,
+				Required: true,
+				Setter:   func(v any) { name = v.(string) },
+			},
+		},
+	}
+
+	// First: empty (re-prompt), second: valid
+	p := tuitesting.New().AddTextInput("").AddTextInput("my-service")
+	engine := NewEngine(p, WithOutput(io.Discard))
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "my-service" {
+		t.Errorf("expected 'my-service', got %q", name)
+	}
+}
+
+func TestEngine_DependencyAwareAutoBack(t *testing.T) {
+	// Flow: region(select) -> name(text) -> gpu(select, depends on region)
+	// When gpu is empty for region=A, should back to region (not name).
+	var region, name, gpu string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "Region A", Value: "a"},
+					Choice{Label: "Region B", Value: "b"},
+				),
+				Setter: func(v any) { region = v.(string) },
+			},
+			{
+				Name:     "name",
+				Prompt:   TextInputPrompt,
+				Required: true,
+				Setter:   func(v any) { name = v.(string) },
+			},
+			{
+				Name:      "gpu",
+				Prompt:    SelectPrompt,
+				Required:  true,
+				DependsOn: []string{"region"},
+				Loader: func(_ context.Context, _ tui.Prompter, c map[string]any) ([]Choice, error) {
+					if c["region"] == "a" {
+						return []Choice{}, nil // empty for region A
+					}
+					return []Choice{{Label: "H100", Value: "h100"}}, nil
+				},
+				Setter: func(v any) { gpu = v.(string) },
+			},
+		},
+	}
+
+	// 1: region=A (idx 0)
+	// 2: name="test"
+	// 3: gpu empty → auto-back to region (skips name!)
+	// 4: region=B (idx 1)
+	// 5: name="test2"
+	// 6: gpu=H100 (idx 0)
+	p := tuitesting.New().
+		AddSelect(0).          // region: A
+		AddTextInput("test").  // name
+		AddSelect(1).          // region: B (after dependency-aware back)
+		AddTextInput("test2"). // name again
+		AddSelect(0)           // gpu: H100
+
+	engine := NewEngine(p, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if region != "b" {
+		t.Errorf("expected region 'b', got %q", region)
+	}
+	if name != "test2" {
+		t.Errorf("expected name 'test2', got %q", name)
+	}
+	if gpu != "h100" {
+		t.Errorf("expected gpu 'h100', got %q", gpu)
+	}
+}
+
+func TestEngine_NilSetter_NosPanic(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "temp",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "A", Value: "a"}),
+				// Setter intentionally nil — should not panic
+			},
+		},
+	}
+
+	p := tuitesting.New().AddSelect(0)
+	engine := NewEngine(p)
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if engine.Collected()["temp"] != "a" {
+		t.Errorf("expected collected value 'a', got %v", engine.Collected()["temp"])
 	}
 }
