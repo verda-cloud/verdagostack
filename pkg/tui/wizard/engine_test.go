@@ -942,3 +942,144 @@ func TestEngine_OptionalEmptyChoices_SkipsWithDefault(t *testing.T) {
 		t.Errorf("expected 'none', got %q", addon)
 	}
 }
+
+func TestEngine_IsSetPropagatesValueToCollected(t *testing.T) {
+	// When IsSet is true and Value is provided, downstream loaders should see it.
+	var gpu string
+	fixedRegion := "FIN-01"
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:   "region",
+				Prompt: SelectPrompt,
+				IsSet:  func() bool { return true },
+				Value:  func() any { return fixedRegion },
+				Loader: StaticChoices(Choice{Label: "Finland", Value: "FIN-01"}),
+				Setter: func(v any) {},
+			},
+			{
+				Name:      "gpu",
+				Prompt:    SelectPrompt,
+				Required:  true,
+				DependsOn: []string{"region"},
+				Loader: func(_ context.Context, _ tui.Prompter, c map[string]any) ([]Choice, error) {
+					// This should see region in collected.
+					if c["region"] != "FIN-01" {
+						t.Errorf("expected region 'FIN-01' in collected, got %v", c["region"])
+					}
+					return []Choice{{Label: "H100", Value: "h100"}}, nil
+				},
+				Setter: func(v any) { gpu = v.(string) },
+			},
+		},
+	}
+
+	p := tuitesting.New().AddSelect(0) // gpu: H100
+	engine := NewEngine(p)
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gpu != "h100" {
+		t.Errorf("expected gpu 'h100', got %q", gpu)
+	}
+	if engine.Collected()["region"] != "FIN-01" {
+		t.Errorf("expected region in collected, got %v", engine.Collected()["region"])
+	}
+}
+
+func TestEngine_MixedFixedEditableDependencies(t *testing.T) {
+	// gpu depends on both region (fixed) and category (editable).
+	// When gpu has no choices, should back to category (not error on region).
+	var category, gpu string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:   "region",
+				Prompt: SelectPrompt,
+				IsSet:  func() bool { return true },
+				Value:  func() any { return "FIN-01" },
+				Setter: func(v any) {},
+			},
+			{
+				Name:     "category",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "GPU", Value: "GPU"},
+					Choice{Label: "CPU", Value: "CPU"},
+				),
+				Setter: func(v any) { category = v.(string) },
+			},
+			{
+				Name:      "gpu",
+				Prompt:    SelectPrompt,
+				Required:  true,
+				DependsOn: []string{"region", "category"},
+				Loader: func(_ context.Context, _ tui.Prompter, c map[string]any) ([]Choice, error) {
+					if c["category"] == "GPU" {
+						return []Choice{}, nil // empty for GPU
+					}
+					return []Choice{{Label: "32 vCPU", Value: "32cpu"}}, nil
+				},
+				Setter: func(v any) { gpu = v.(string) },
+			},
+		},
+	}
+
+	// 1: category=GPU → gpu empty → auto-back to category (not error on fixed region)
+	// 2: category=CPU → gpu=32cpu
+	p := tuitesting.New().
+		AddSelect(0). // category: GPU
+		AddSelect(1). // category: CPU (after auto-back)
+		AddSelect(0)  // gpu: 32cpu
+
+	engine := NewEngine(p, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if category != "CPU" {
+		t.Errorf("expected category 'CPU', got %q", category)
+	}
+	if gpu != "32cpu" {
+		t.Errorf("expected gpu '32cpu', got %q", gpu)
+	}
+}
+
+func TestEngine_OptionalEmptyNoDefault_Resets(t *testing.T) {
+	addon := "stale"
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "addon",
+				Prompt:   SelectPrompt,
+				Required: false,
+				// No Default — should reset stale value
+				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+					return []Choice{}, nil
+				},
+				Setter:   func(v any) { addon = v.(string) },
+				Resetter: func() { addon = "" },
+			},
+		},
+	}
+
+	p := tuitesting.New()
+	engine := NewEngine(p)
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if addon != "" {
+		t.Errorf("expected addon reset to empty, got %q", addon)
+	}
+}

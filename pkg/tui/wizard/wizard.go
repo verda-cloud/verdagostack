@@ -41,8 +41,9 @@ type Step struct {
 	Loader      LoaderFunc
 	Validate    func(value any) error
 	Setter      func(value any)
-	Resetter    func() // Called when step value is cleared (back/skip). Resets the bound variable.
-	IsSet       func() bool
+	Resetter    func()      // Called when step value is cleared (back/skip). Resets the bound variable.
+	IsSet       func() bool // Returns true if value was provided via flag/config.
+	Value       func() any  // Returns the current value when IsSet is true. Propagates to collected map.
 	DependsOn   []string
 }
 

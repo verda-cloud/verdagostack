@@ -59,15 +59,17 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		step := flow.Steps[e.current]
 
 		if step.IsSet != nil && step.IsSet() {
+			// Propagate the pre-set value so downstream loaders/callbacks can see it.
+			if step.Value != nil {
+				e.collected[step.Name] = step.Value()
+			}
 			e.current++
 			continue
 		}
 
 		if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
-			// Clear any stale value from a previous pass through this step.
-			if _, hadValue := e.collected[step.Name]; hadValue {
-				e.resetStep(step)
-			}
+			// Always clear stale values when skipping, even on first pass.
+			e.resetStep(step)
 			e.current++
 			continue
 		}
@@ -79,13 +81,15 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 
 		if step.Loader != nil && len(choices) == 0 {
 			if !step.Required {
-				// Optional step with empty choices — apply default and skip.
+				// Optional step with empty choices — apply default or reset and skip.
 				if step.Default != nil {
 					val := step.Default(e.collected)
 					if step.Setter != nil {
 						step.Setter(val)
 					}
 					e.collected[step.Name] = val
+				} else {
+					e.resetStep(step)
 				}
 				e.current++
 				continue
@@ -240,10 +244,8 @@ func (e *Engine) goBack(flow *Flow) {
 	e.current = 0
 }
 
-// goBackToDependency rewinds to the nearest step listed in the current step's
-// DependsOn. This skips over intervening text/confirm steps so the user lands
-// on the step that actually controls the empty result.
-// Returns error if all dependencies are fixed (IsSet) and cannot be changed.
+// goBackToDependency rewinds to the nearest editable step listed in the current
+// step's DependsOn. Returns error only if ALL dependencies are fixed (IsSet).
 func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
 	if len(current.DependsOn) == 0 {
 		e.goBack(flow)
@@ -255,27 +257,37 @@ func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
 		depSet[d] = true
 	}
 
-	// Scan backwards for an editable dependency.
+	// Scan all dependency steps, collect editable ones.
+	nearestEditable := -1
+	allFixed := true
 	for i := e.current - 1; i >= 0; i-- {
 		step := flow.Steps[i]
 		if !depSet[step.Name] {
 			continue
 		}
-		// Found a dependency — check if it's editable.
 		if step.IsSet != nil && step.IsSet() {
-			// This dependency is fixed via flag — can't change it.
-			// Return error so the wizard stops instead of looping.
-			return fmt.Errorf("step %q has no options available and its dependency %q is fixed (set via flag)", current.Name, step.Name)
+			continue // fixed — skip, but keep scanning for editable ones
 		}
-		// Editable dependency found — clear it and everything after up to current.
-		for j := i; j < e.current; j++ {
+		allFixed = false
+		if nearestEditable == -1 || i > nearestEditable {
+			nearestEditable = i
+		}
+	}
+
+	if allFixed {
+		return fmt.Errorf("step %q has no options available and all its dependencies %v are fixed (set via flag)", current.Name, current.DependsOn)
+	}
+
+	if nearestEditable >= 0 {
+		// Clear everything from the editable dep up to current.
+		for j := nearestEditable; j < e.current; j++ {
 			e.resetStep(flow.Steps[j])
 		}
-		e.current = i
+		e.current = nearestEditable
 		return nil
 	}
 
-	// No dependency found, fall back to regular goBack.
+	// No dependency found in flow, fall back.
 	e.goBack(flow)
 	return nil
 }
