@@ -2,18 +2,25 @@
 // "deploy service" flow. It uses mock data to simulate API responses,
 // conditional steps, dependencies, and back-navigation.
 //
-// Run: go run ./pkg/tui/examples/wizard
+// Run with different themes:
+//
+//	go run ./pkg/tui/examples/wizard
+//	go run ./pkg/tui/examples/wizard -theme dracula
+//	go run ./pkg/tui/examples/wizard -theme catppuccin
+//	go run ./pkg/tui/examples/wizard -theme nord
+//	go run ./pkg/tui/examples/wizard -theme tokyonight
 package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"math/rand/v2"
 	"strings"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
-	_ "github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
+	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
 
@@ -79,6 +86,22 @@ var (
 )
 
 func main() {
+	theme := flag.String("theme", "default", "color theme: default, dracula, catppuccin, nord, tokyonight")
+	flag.Parse()
+
+	switch *theme {
+	case "dracula":
+		bubbletea.SetTheme(bubbletea.ThemeDracula)
+	case "catppuccin":
+		bubbletea.SetTheme(bubbletea.ThemeCatppuccin)
+	case "nord":
+		bubbletea.SetTheme(bubbletea.ThemeNord)
+	case "tokyonight":
+		bubbletea.SetTheme(bubbletea.ThemeTokyoNight)
+	default:
+		// ThemeDefault is applied automatically
+	}
+
 	ctx := context.Background()
 	p := tui.Default()
 
