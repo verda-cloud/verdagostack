@@ -401,3 +401,140 @@ func TestEngine_CachesLoaderResults(t *testing.T) {
 		t.Errorf("expected loader called once, got %d", loadCount)
 	}
 }
+
+func TestEngine_FullFlow_VMCreate(t *testing.T) {
+	var category, contract, compute, instType, location, image, hostname string
+	var sshKeys []string
+
+	flow := &Flow{
+		Name: "vm-create",
+		Steps: []Step{
+			{
+				Name:     "instance-category",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "On-Demand", Value: "on-demand"},
+					Choice{Label: "Spot", Value: "spot"},
+				),
+				Setter: func(v any) { category = v.(string) },
+			},
+			{
+				Name:       "contract",
+				Prompt:     SelectPrompt,
+				Required:   false,
+				Default:    func(_ map[string]any) any { return "PAY_AS_YOU_GO" },
+				ShouldSkip: func(c map[string]any) bool { return c["instance-category"] == "spot" },
+				Loader: StaticChoices(
+					Choice{Label: "Pay as you go", Value: "PAY_AS_YOU_GO"},
+					Choice{Label: "1 month", Value: "1_MONTH"},
+				),
+				Setter: func(v any) { contract = v.(string) },
+			},
+			{
+				Name:     "compute-category",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "GPU", Value: "GPU"},
+					Choice{Label: "CPU", Value: "CPU"},
+				),
+				Setter: func(v any) { compute = v.(string) },
+			},
+			{
+				Name:      "instance-type",
+				Prompt:    SelectPrompt,
+				Required:  true,
+				DependsOn: []string{"compute-category"},
+				Loader: func(_ context.Context, _ tui.Prompter, c map[string]any) ([]Choice, error) {
+					if c["compute-category"] == "GPU" {
+						return []Choice{
+							{Label: "H100 80GB", Value: "1H100"},
+							{Label: "A100 40GB", Value: "1A100"},
+						}, nil
+					}
+					return []Choice{{Label: "32 vCPU", Value: "32CPU"}}, nil
+				},
+				Setter: func(v any) { instType = v.(string) },
+			},
+			{
+				Name:      "location",
+				Prompt:    SelectPrompt,
+				Required:  true,
+				DependsOn: []string{"instance-type"},
+				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+					return []Choice{{Label: "Finland (FIN-01)", Value: "FIN-01"}}, nil
+				},
+				Setter: func(v any) { location = v.(string) },
+			},
+			{
+				Name:      "image",
+				Prompt:    SelectPrompt,
+				Required:  true,
+				DependsOn: []string{"instance-type"},
+				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+					return []Choice{{Label: "Ubuntu 24.04", Value: "ubuntu-24.04"}}, nil
+				},
+				Setter: func(v any) { image = v.(string) },
+			},
+			{
+				Name:     "ssh-keys",
+				Prompt:   MultiSelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "my-key", Value: "key-1"},
+					Choice{Label: "work-key", Value: "key-2"},
+				),
+				Setter: func(v any) { sshKeys = v.([]string) },
+			},
+			{
+				Name:     "hostname",
+				Prompt:   TextInputPrompt,
+				Required: true,
+				Default:  func(_ map[string]any) any { return "vm-001" },
+				Setter:   func(v any) { hostname = v.(string) },
+			},
+		},
+	}
+
+	p := tuitesting.New().
+		AddSelect(0).                // on-demand
+		AddSelect(0).                // pay as you go
+		AddSelect(0).                // GPU
+		AddSelect(0).                // H100
+		AddSelect(0).                // FIN-01
+		AddSelect(0).                // Ubuntu
+		AddMultiSelect([]int{0, 1}). // both SSH keys
+		AddTextInput("my-vm")        // hostname
+
+	engine := NewEngine(p)
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if category != "on-demand" {
+		t.Errorf("category: got %q", category)
+	}
+	if contract != "PAY_AS_YOU_GO" {
+		t.Errorf("contract: got %q", contract)
+	}
+	if compute != "GPU" {
+		t.Errorf("compute: got %q", compute)
+	}
+	if instType != "1H100" {
+		t.Errorf("instType: got %q", instType)
+	}
+	if location != "FIN-01" {
+		t.Errorf("location: got %q", location)
+	}
+	if image != "ubuntu-24.04" {
+		t.Errorf("image: got %q", image)
+	}
+	if len(sshKeys) != 2 {
+		t.Errorf("sshKeys: got %v", sshKeys)
+	}
+	if hostname != "my-vm" {
+		t.Errorf("hostname: got %q", hostname)
+	}
+}
