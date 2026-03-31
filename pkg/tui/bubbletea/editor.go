@@ -39,7 +39,7 @@ func (m editorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+d":
 			m.submitted = true
 			return m, tea.Quit
-		case "ctrl+c", "esc":
+		case keyCtrlC, keyEsc:
 			m.aborted = true
 			return m, tea.Quit
 		}

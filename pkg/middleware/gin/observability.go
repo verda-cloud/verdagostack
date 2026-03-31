@@ -182,7 +182,7 @@ func matchPath(requestPath, method, pattern string) bool {
 	if strings.Contains(pattern, " ") {
 		parts := strings.SplitN(pattern, " ", 2)
 		if len(parts) == 2 {
-			if strings.ToUpper(strings.TrimSpace(parts[0])) != strings.ToUpper(method) {
+			if !strings.EqualFold(strings.TrimSpace(parts[0]), method) {
 				return false
 			}
 			return matchPathPattern(requestPath, strings.TrimSpace(parts[1]))

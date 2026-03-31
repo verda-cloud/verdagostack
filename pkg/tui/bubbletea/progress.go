@@ -88,7 +88,7 @@ func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.progress = mdl.(progress.Model)
 		return m, cmd
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		if msg.String() == keyCtrlC {
 			m.done = true
 			m.finalMessage = m.message
 			return m, tea.Quit

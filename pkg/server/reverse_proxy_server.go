@@ -67,9 +67,10 @@ func NewGRPCGatewayServer(
 
 	return &GRPCGatewayServer{
 		srv: &http.Server{
-			Addr:      insecureOptions.Addr,
-			Handler:   gwmux,
-			TLSConfig: tlsConfig,
+			Addr:              insecureOptions.Addr,
+			Handler:           gwmux,
+			TLSConfig:         tlsConfig,
+			ReadHeaderTimeout: 10 * time.Second,
 		},
 	}, nil
 }

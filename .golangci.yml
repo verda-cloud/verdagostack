@@ -1,0 +1,69 @@
+version: "2"
+
+run:
+  go: "1.25"
+  concurrency: 4
+  timeout: 5m
+  tests: false
+
+linters:
+  disable-all: true
+  enable:
+    # Essential error checking
+    - errcheck      # Check for unchecked errors
+    - govet         # Go vet analysis
+    - staticcheck   # Advanced Go analyzer
+    - unused        # Find unused code
+
+    # Code quality
+    - ineffassign   # Detect ineffectual assignments
+    - unconvert     # Remove unnecessary type conversions
+    - misspell      # Fix spelling mistakes
+
+    # Security
+    - gosec         # Security checks
+
+    # Style (less strict)
+    - gocyclo       # Cyclomatic complexity
+    - dupl          # Code duplication
+    - goconst       # Repeated strings that should be constants
+
+linters-settings:
+  errcheck:
+    check-type-assertions: false
+    check-blank: true
+  dupl:
+    threshold: 100
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  gocyclo:
+    min-complexity: 30
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-dirs:
+    - vendor
+    - third_party
+  exclude-rules:
+    # Test files - relax SOME rules but keep staticcheck
+    - linters:
+        - dupl
+        - errcheck
+        - goconst
+        - gocyclo
+        - gosec
+      path: _test\.go
+
+    # Example code - relax all rules
+    - linters:
+        - errcheck
+        - gosec
+      path: example/
+
+    # Allow blank error assignment in defer (common pattern)
+    - linters:
+        - errcheck
+      text: 'Error return value of .*(Close|Flush|Remove|Write).*is not checked'
+      source: 'defer.*\.Close\(\)'

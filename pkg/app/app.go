@@ -244,7 +244,7 @@ func (app *App) runCommand(cmd *cobra.Command, args []string) error {
 
 	if !app.silence {
 		slog.Info("Starting application", "name", app.name, "version", version.Get().ToJSON())
-		slog.Info("Golang settings", "GOGC", os.Getenv("GOGC"), "GOMAXPROCS", os.Getenv("GOMAXPROCS"), "GOTRACEBACK", os.Getenv("GOTRACEBACK"))
+		slog.Info("Golang settings", "GOGC", os.Getenv("GOGC"), "GOMAXPROCS", os.Getenv("GOMAXPROCS"), "GOTRACEBACK", os.Getenv("GOTRACEBACK")) //nolint:gosec // G706: values are from environment variables, not user input
 		if !app.noConfig {
 			PrintConfig()
 		} else if app.options != nil {

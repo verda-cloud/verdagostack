@@ -10,6 +10,8 @@ const (
 	XForwardedFor = "X-Forwarded-For"
 	XRealIP       = "X-Real-IP"
 	XClientIP     = "x-client-ip"
+
+	localhost = "127.0.0.1"
 )
 
 // GetLocalIP returns the first non-loopback IPv4 address of the host.
@@ -17,7 +19,7 @@ const (
 func GetLocalIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		return "127.0.0.1"
+		return localhost
 	}
 	for _, addr := range addrs {
 		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
@@ -26,7 +28,7 @@ func GetLocalIP() string {
 			}
 		}
 	}
-	return "127.0.0.1"
+	return localhost
 }
 
 // RemoteIP extracts the client IP from an HTTP request, checking common
@@ -44,7 +46,7 @@ func RemoteIP(req *http.Request) string {
 		remoteAddr, _, _ = net.SplitHostPort(remoteAddr)
 	}
 	if remoteAddr == "::1" {
-		remoteAddr = "127.0.0.1"
+		remoteAddr = localhost
 	}
 	return remoteAddr
 }

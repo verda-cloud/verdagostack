@@ -15,12 +15,17 @@ import (
 	"runtime/debug"
 )
 
+const (
+	unknownValue = "unknown"
+	trueValue    = "true"
+)
+
 // Build-time variables set via -ldflags.
 var (
 	gitVersion   = "v0.0.0-dev"
-	gitCommit    = "unknown"
-	gitTreeState = "unknown"
-	buildDate    = "unknown"
+	gitCommit    = unknownValue
+	gitTreeState = unknownValue
+	buildDate    = unknownValue
 )
 
 // Info holds the version information for a binary.
@@ -73,19 +78,19 @@ func GetFromDebugInfo(modulePath string) Info {
 	for _, setting := range bi.Settings {
 		switch setting.Key {
 		case "vcs.revision":
-			if info.GitCommit == "unknown" {
+			if info.GitCommit == unknownValue {
 				info.GitCommit = setting.Value
 			}
 		case "vcs.modified":
-			if info.GitTreeState == "unknown" {
-				if setting.Value == "true" {
+			if info.GitTreeState == unknownValue {
+				if setting.Value == trueValue {
 					info.GitTreeState = "dirty"
 				} else {
 					info.GitTreeState = "clean"
 				}
 			}
 		case "vcs.time":
-			if info.BuildDate == "unknown" {
+			if info.BuildDate == unknownValue {
 				info.BuildDate = setting.Value
 			}
 		}

@@ -145,7 +145,7 @@ func loadResource(input string) ([]byte, error) {
 
 	if !strings.Contains(input, "\n") && len(input) < 1024 {
 		if _, err := os.Stat(input); err == nil {
-			return os.ReadFile(input)
+			return os.ReadFile(input) //nolint:gosec // G304: file path comes from TLS config, not arbitrary user input
 		}
 	}
 

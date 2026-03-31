@@ -56,10 +56,10 @@ func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.loop {
 				m.cursor = 0
 			}
-		case "enter":
+		case keyEnter:
 			m.chosen = true
 			return m, tea.Quit
-		case "ctrl+c", "esc":
+		case keyCtrlC, keyEsc:
 			m.aborted = true
 			return m, tea.Quit
 		}
@@ -73,14 +73,14 @@ func (m selectModel) View() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("? %s\n", m.prompt))
+	fmt.Fprintf(&b, "? %s\n", m.prompt)
 
 	start, end := m.visibleRange()
 	for i := start; i < end; i++ {
 		if i == m.cursor {
-			b.WriteString(fmt.Sprintf("  > %s\n", m.choices[i]))
+			fmt.Fprintf(&b, "  > %s\n", m.choices[i])
 		} else {
-			b.WriteString(fmt.Sprintf("    %s\n", m.choices[i]))
+			fmt.Fprintf(&b, "    %s\n", m.choices[i])
 		}
 	}
 	return b.String()

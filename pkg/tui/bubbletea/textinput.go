@@ -38,7 +38,7 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "enter":
+		case keyEnter:
 			if m.validate != nil {
 				if err := m.validate(m.textInput.Value()); err != nil {
 					m.err = err
@@ -47,7 +47,7 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.submitted = true
 			return m, tea.Quit
-		case "ctrl+c", "esc":
+		case keyCtrlC, keyEsc:
 			m.aborted = true
 			return m, tea.Quit
 		}

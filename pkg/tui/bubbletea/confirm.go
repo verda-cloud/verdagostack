@@ -37,10 +37,10 @@ func (m confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.value = false
 			m.decided = true
 			return m, tea.Quit
-		case "enter":
+		case keyEnter:
 			m.decided = true
 			return m, tea.Quit
-		case "ctrl+c", "esc":
+		case keyCtrlC, keyEsc:
 			m.aborted = true
 			return m, tea.Quit
 		}

@@ -1,20 +1,82 @@
 # Verdagostack Makefile
 # ──────────────────────────────────────────────────────────────────────
 
-.PHONY: build test vet lint tag tag-list tag-delete release changelog help
+.PHONY: build test lint fmt security setup pre-commit
+.PHONY: tag tag-list tag-delete release changelog help
+
+# ─── Development Setup ──────────────────────────────────────────────
+
+setup: ## Complete development environment setup (installs only what's needed)
+	@echo "→ Setting up development environment..."
+	@echo ""
+	@if ! command -v golangci-lint >/dev/null 2>&1; then \
+		echo "Installing golangci-lint..."; \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; \
+		echo "✓ golangci-lint installed"; \
+	else \
+		echo "✓ golangci-lint already installed ($$(golangci-lint --version))"; \
+	fi
+	@echo ""
+	@if command -v pre-commit >/dev/null 2>&1; then \
+		if [ ! -f .git/hooks/pre-commit ]; then \
+			echo "Installing pre-commit hooks..."; \
+			pre-commit install >/dev/null 2>&1; \
+			pre-commit install --hook-type commit-msg >/dev/null 2>&1; \
+			echo "✓ Pre-commit hooks installed"; \
+		else \
+			echo "✓ Pre-commit hooks already installed"; \
+		fi; \
+	else \
+		echo "⚠ pre-commit not found (optional)"; \
+		echo "  Install: brew install pre-commit (macOS) or pip install pre-commit"; \
+	fi
+	@echo ""
+	@echo "✓ Development environment ready!"
 
 # ─── Build & Test ────────────────────────────────────────────────────
 
 build: ## Build all packages
-	go build ./...
+	@echo "→ Building..."
+	@go build ./...
+	@echo "✓ Build successful!"
 
 test: ## Run all tests
-	go test ./... -count=1
+	@echo "→ Running tests..."
+	@go test ./... -count=1
+	@echo "✓ Tests passed!"
 
-vet: ## Run go vet
-	go vet ./...
+# ─── Code Quality ───────────────────────────────────────────────────
 
-lint: vet ## Alias for vet (add staticcheck/golangci-lint here if desired)
+lint: ## Run golangci-lint
+	@echo "→ Running golangci-lint..."
+	@golangci-lint run ./...
+	@echo "✓ Linting complete!"
+
+fmt: ## Format Go code
+	@echo "→ Formatting Go code..."
+	@gofmt -w -s .
+	@if command -v goimports >/dev/null 2>&1; then \
+		goimports -w .; \
+	else \
+		echo "  ℹ goimports not found, skipping import formatting"; \
+	fi
+	@echo "✓ Formatting complete!"
+
+security: ## Run security checks (gosec + govulncheck)
+	@echo "→ Running security checks..."
+	@echo "  1. Running gosec (via golangci-lint)..."
+	@golangci-lint run --no-config -E gosec ./...
+	@echo "  2. Running govulncheck..."
+	@if ! command -v govulncheck >/dev/null 2>&1; then \
+		echo "    Installing govulncheck..."; \
+		go install golang.org/x/vuln/cmd/govulncheck@latest; \
+	fi
+	@govulncheck ./...
+	@echo "✓ Security checks complete!"
+
+pre-commit: ## Run all pre-commit hooks on all files
+	@echo "→ Running pre-commit hooks on all files..."
+	@pre-commit run --all-files
 
 # ─── Version Tagging ─────────────────────────────────────────────────
 #

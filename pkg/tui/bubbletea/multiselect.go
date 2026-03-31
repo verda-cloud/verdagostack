@@ -75,14 +75,14 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.err = ""
 				}
 			}
-		case "enter":
+		case keyEnter:
 			if m.min > 0 && len(m.selected) < m.min {
 				m.err = fmt.Sprintf("at least %d selections required", m.min)
 				return m, nil
 			}
 			m.done = true
 			return m, tea.Quit
-		case "ctrl+c", "esc":
+		case keyCtrlC, keyEsc:
 			m.aborted = true
 			return m, tea.Quit
 		}
@@ -102,7 +102,7 @@ func (m multiSelectModel) View() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("? %s (space to toggle, enter to confirm)\n", m.prompt))
+	fmt.Fprintf(&b, "? %s (space to toggle, enter to confirm)\n", m.prompt)
 
 	start, end := m.visibleRange()
 	for i := start; i < end; i++ {
@@ -114,11 +114,11 @@ func (m multiSelectModel) View() string {
 		if m.selected[i] {
 			check = "[x]"
 		}
-		b.WriteString(fmt.Sprintf("  %s%s %s\n", cursor, check, m.choices[i]))
+		fmt.Fprintf(&b, "  %s%s %s\n", cursor, check, m.choices[i])
 	}
 
 	if m.err != "" {
-		b.WriteString(fmt.Sprintf("  ✗ %s\n", m.err))
+		fmt.Fprintf(&b, "  ✗ %s\n", m.err)
 	}
 	return b.String()
 }

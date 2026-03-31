@@ -46,7 +46,7 @@ func (o *HealthOptions) Serve() {
 	mux.HandleFunc(o.HealthCheckPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status": "ok"}`)) //nolint:errcheck
+		_, _ = w.Write([]byte(`{"status": "ok"}`)) //nolint:errcheck
 	})
 
 	if o.HTTPProfile {

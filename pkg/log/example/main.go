@@ -125,7 +125,7 @@ func main() {
 
 	if data, err := os.ReadFile(tmpFile); err == nil {
 		fmt.Printf("File contents: %s", data)
-		os.Remove(tmpFile)
+		_ = os.Remove(tmpFile)
 	}
 
 	fmt.Println("\n=== Done ===")

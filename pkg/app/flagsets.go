@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // NamedFlagSets stores named flag sets in the order of calling FlagSet.
@@ -37,14 +38,14 @@ func SetUsageAndHelpFunc(cmd *cobra.Command, nfs NamedFlagSets, cols int) {
 	}
 
 	cmd.SetUsageFunc(func(cmd *cobra.Command) error {
-		fmt.Fprintf(cmd.OutOrStderr(), "Usage:\n  %s\n", cmd.UseLine())
+		_, _ = fmt.Fprintf(cmd.OutOrStderr(), "Usage:\n  %s\n", cmd.UseLine())
 
 		PrintSections(cmd.OutOrStderr(), nfs, cols)
 		return nil
 	})
 
 	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		fmt.Fprintf(cmd.OutOrStdout(), "%s\n\nUsage:\n  %s\n", cmd.Long, cmd.UseLine())
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n\nUsage:\n  %s\n", cmd.Long, cmd.UseLine())
 
 		PrintSections(cmd.OutOrStdout(), nfs, cols)
 	})
@@ -63,7 +64,7 @@ func PrintSections(w io.Writer, nfs NamedFlagSets, cols int) {
 		fs.PrintDefaults()
 
 		if buf.Len() > 0 {
-			fmt.Fprintf(w, "\n%s flags:\n\n%s", strings.Title(name), buf.String()) //nolint:staticcheck
+			_, _ = fmt.Fprintf(w, "\n%s flags:\n\n%s", cases.Title(language.English).String(name), buf.String())
 		}
 	}
 }

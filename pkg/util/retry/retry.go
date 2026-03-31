@@ -123,5 +123,5 @@ func jitter(d time.Duration, maxFactor float64) time.Duration {
 		return d
 	}
 	delta := maxFactor * float64(d)
-	return d + time.Duration(math.Floor(delta*rand.Float64()))
+	return d + time.Duration(math.Floor(delta*rand.Float64())) //nolint:gosec // G404: crypto/rand not needed for jitter timing
 }
