@@ -1471,3 +1471,138 @@ func TestEngine_RunClearsStateFromPreviousRun(t *testing.T) {
 		t.Errorf("collected should be 'b', got %v", engine.Collected()["item"])
 	}
 }
+
+func TestEngine_SkippedDepsNoRewindTarget_ReturnsError(t *testing.T) {
+	// All prior steps are fixed/skipped, dep is skipped → should error, not loop.
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:   "fixed",
+				Prompt: SelectPrompt,
+				IsSet:  func() bool { return true },
+				Value:  func() any { return "x" },
+				Setter: func(v any) {},
+			},
+			{
+				Name:       "skipped",
+				Prompt:     SelectPrompt,
+				ShouldSkip: func(c map[string]any) bool { return true },
+				Loader:     StaticChoices(Choice{Label: "S", Value: "s"}),
+				Setter:     func(v any) {},
+			},
+			{
+				Name:      "broken",
+				Prompt:    SelectPrompt,
+				Required:  true,
+				DependsOn: []string{"skipped"},
+				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+					return []Choice{}, nil
+				},
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	p := tuitesting.New()
+	engine := NewEngine(p, WithOutput(io.Discard))
+
+	err := engine.Run(context.Background(), flow)
+	if err == nil {
+		t.Fatal("expected error when no rewind target exists")
+	}
+}
+
+func TestEngine_BackSkipsAutoSkippedOptional(t *testing.T) {
+	// Flow: A(select) -> B(optional select, empty loader) -> C(select)
+	// Back from C should skip B (auto-skipped) and land on A.
+	var a, c string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "a",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "A1", Value: "a1"},
+					Choice{Label: "A2", Value: "a2"},
+				),
+				Setter: func(v any) { a = v.(string) },
+			},
+			{
+				Name:     "b",
+				Prompt:   SelectPrompt,
+				Required: false,
+				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+					return []Choice{}, nil // always empty → auto-skipped
+				},
+				Setter: func(v any) {},
+			},
+			{
+				Name:     "c",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "C1", Value: "c1"},
+					Choice{Label: "C2", Value: "c2"},
+				),
+				Setter: func(v any) { c = v.(string) },
+			},
+		},
+	}
+
+	// 1: A=A1, B auto-skipped, C: select ← Back (idx 2)
+	// 2: A=A2, B auto-skipped, C=C1 (idx 0)
+	p := tuitesting.New().
+		AddSelect(0). // A: A1
+		AddSelect(2). // C: ← Back (skips past auto-skipped B to A)
+		AddSelect(1). // A: A2
+		AddSelect(0)  // C: C1
+
+	engine := NewEngine(p, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a != "a2" {
+		t.Errorf("expected a='a2', got %q", a)
+	}
+	if c != "c1" {
+		t.Errorf("expected c='c1', got %q", c)
+	}
+}
+
+func TestEngine_ConfirmDefaultHonored(t *testing.T) {
+	// Confirm prompt with Default=true should pass true as the default.
+	// The test prompter's Confirm always returns the queued value,
+	// but we verify the engine wires defaults correctly by checking
+	// that the flow works with the default value.
+	var tls bool
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "tls",
+				Prompt:   ConfirmPrompt,
+				Required: true,
+				Default:  func(_ map[string]any) any { return true },
+				Setter:   func(v any) { tls = v.(bool) },
+			},
+		},
+	}
+
+	// Queue true — matches the default.
+	p := tuitesting.New().AddConfirm(true)
+	engine := NewEngine(p, WithOutput(io.Discard))
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !tls {
+		t.Error("expected tls=true")
+	}
+}

@@ -12,11 +12,12 @@ import (
 
 // Engine runs a wizard Flow interactively.
 type Engine struct {
-	prompter  tui.Prompter
-	cache     *stepCache
-	collected map[string]any
-	current   int
-	writer    io.Writer
+	prompter    tui.Prompter
+	cache       *stepCache
+	collected   map[string]any
+	autoSkipped map[string]bool // steps auto-skipped due to empty loader results
+	current     int
+	writer      io.Writer
 }
 
 // NewEngine creates a wizard engine with the given prompter.
@@ -57,6 +58,7 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	e.current = 0
 	e.collected = make(map[string]any)
 	e.cache = newStepCache()
+	e.autoSkipped = make(map[string]bool)
 	for e.current < len(flow.Steps) {
 		step := flow.Steps[e.current]
 
@@ -101,6 +103,7 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 				} else {
 					e.resetStep(step)
 				}
+				e.autoSkipped[step.Name] = true
 				e.current++
 				continue
 			}
@@ -154,6 +157,7 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			step.Setter(value)
 		}
 		e.collected[step.Name] = value
+		delete(e.autoSkipped, step.Name)
 		e.invalidateDownstream(flow, step.Name)
 		e.current++
 	}
@@ -183,7 +187,8 @@ var errGoBack = fmt.Errorf("go back")
 const backLabel = "← Back"
 
 // hasEditablePriorStep returns true if there is at least one earlier step
-// that is not fixed (IsSet) and not currently skipped (ShouldSkip).
+// that is not fixed (IsSet), not currently skipped (ShouldSkip), and not
+// auto-skipped due to empty loader results.
 func (e *Engine) hasEditablePriorStep(flow *Flow) bool {
 	for i := e.current - 1; i >= 0; i-- {
 		step := flow.Steps[i]
@@ -191,6 +196,9 @@ func (e *Engine) hasEditablePriorStep(flow *Flow) bool {
 			continue
 		}
 		if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
+			continue
+		}
+		if e.autoSkipped[step.Name] {
 			continue
 		}
 		return true
@@ -250,7 +258,13 @@ func (e *Engine) prompt(ctx context.Context, step Step, choices []Choice, canGoB
 		return e.prompter.TextInput(ctx, step.Description, opts...)
 
 	case ConfirmPrompt:
-		return e.prompter.Confirm(ctx, step.Description)
+		var cOpts []tui.ConfirmOption
+		if step.Default != nil {
+			if d, ok := step.Default(e.collected).(bool); ok {
+				cOpts = append(cOpts, tui.WithConfirmDefault(d))
+			}
+		}
+		return e.prompter.Confirm(ctx, step.Description, cOpts...)
 
 	case PasswordPrompt:
 		return e.prompter.Password(ctx, step.Description)
@@ -269,6 +283,10 @@ func (e *Engine) goBack(flow *Flow) {
 			continue
 		}
 		if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
+			e.current--
+			continue
+		}
+		if e.autoSkipped[step.Name] {
 			e.current--
 			continue
 		}
@@ -331,8 +349,7 @@ func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
 	}
 
 	// Dependencies are currently skipped. Find the earliest editable step
-	// that could change the skip condition. We go to the earliest (not nearest)
-	// because the skip condition typically depends on an earlier choice.
+	// that could change the skip condition.
 	if hasSkippedDep {
 		for i := 0; i < e.current; i++ {
 			step := flow.Steps[i]
@@ -349,11 +366,12 @@ func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
 			e.current = i
 			return nil
 		}
+		// All steps before current are fixed or skipped — no rewind target.
+		return fmt.Errorf("step %q has no options available and no editable prior step exists to change the outcome", current.Name)
 	}
 
-	// Last resort fallback.
-	e.goBack(flow)
-	return nil
+	// No dependencies matched at all — should not happen, but fail safely.
+	return fmt.Errorf("step %q has no options available and cannot go back", current.Name)
 }
 
 func (e *Engine) invalidateDownstream(flow *Flow, changedStep string) {
