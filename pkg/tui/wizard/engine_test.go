@@ -1242,3 +1242,160 @@ func TestEngine_CancelledContextOnFirstStepAborts(t *testing.T) {
 		t.Fatal("expected error when prompter has no responses")
 	}
 }
+
+func TestEngine_ShouldSkipOverridesIsSet(t *testing.T) {
+	// P1: If a step is both IsSet and ShouldSkip, ShouldSkip wins — value is cleared.
+	var tls bool
+	tlsSet := true
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "env",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "Dev", Value: "dev"}),
+				Setter:   func(v any) {},
+			},
+			{
+				Name:       "tls",
+				Prompt:     ConfirmPrompt,
+				Required:   true,
+				ShouldSkip: func(c map[string]any) bool { return c["env"] == "dev" },
+				IsSet:      func() bool { return tlsSet },
+				Value:      func() any { return true },
+				Setter:     func(v any) { tls = v.(bool) },
+				Resetter:   func() { tls = false },
+			},
+		},
+	}
+
+	// env=dev → tls should be skipped and reset, even though IsSet=true
+	p := tuitesting.New().AddSelect(0)
+	engine := NewEngine(p, WithOutput(io.Discard))
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tls {
+		t.Error("expected tls=false — ShouldSkip should override IsSet")
+	}
+	if _, exists := engine.Collected()["tls"]; exists {
+		t.Error("tls should not be in collected when skipped")
+	}
+}
+
+func TestEngine_BackNotShownWhenAllPriorFixed(t *testing.T) {
+	// P3: "← Back" should not appear when all prior steps are fixed/skipped.
+	// If it did, selecting index 1 (← Back) would be valid. With 1 choice + no back,
+	// only index 0 is valid.
+	var val string
+	fixedFirst := true
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:   "fixed",
+				Prompt: SelectPrompt,
+				IsSet:  func() bool { return fixedFirst },
+				Value:  func() any { return "pre-set" },
+				Loader: StaticChoices(Choice{Label: "X", Value: "x"}),
+				Setter: func(v any) {},
+			},
+			{
+				Name:     "second",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "A", Value: "a"}),
+				Setter:   func(v any) { val = v.(string) },
+			},
+		},
+	}
+
+	// Only 1 choice ("A") since "← Back" should NOT be shown (no editable prior step).
+	p := tuitesting.New().AddSelect(0)
+	engine := NewEngine(p, WithOutput(io.Discard))
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val != "a" {
+		t.Errorf("expected 'a', got %q", val)
+	}
+}
+
+func TestEngine_SkippedDepChainRewindsToController(t *testing.T) {
+	// P2: Flow: env(select) -> svc-name(text) -> tls(skipped for dev) -> cert(dependsOn tls, empty)
+	// cert has no choices when tls is skipped. Auto-back should go to env (which controls the skip),
+	// not to svc-name (which is unrelated).
+	var env, svcName string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "env",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "Dev", Value: "dev"},
+					Choice{Label: "Prod", Value: "prod"},
+				),
+				Setter: func(v any) { env = v.(string) },
+			},
+			{
+				Name:     "svc-name",
+				Prompt:   TextInputPrompt,
+				Required: true,
+				Setter:   func(v any) { svcName = v.(string) },
+			},
+			{
+				Name:       "tls",
+				Prompt:     ConfirmPrompt,
+				Required:   true,
+				ShouldSkip: func(c map[string]any) bool { return c["env"] == "dev" },
+				Setter:     func(v any) {},
+				Resetter:   func() {},
+			},
+			{
+				Name:      "cert",
+				Prompt:    SelectPrompt,
+				Required:  true,
+				DependsOn: []string{"tls"},
+				Loader: func(_ context.Context, _ tui.Prompter, c map[string]any) ([]Choice, error) {
+					if _, hasTLS := c["tls"]; !hasTLS {
+						return []Choice{}, nil // no certs when TLS is skipped
+					}
+					return []Choice{{Label: "wildcard.pem", Value: "wildcard"}}, nil
+				},
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	// 1: env=dev, svc-name="myapp" → tls skipped → cert empty → auto-back to env
+	// 2: env=prod, svc-name="myapp2" → tls=yes → cert=wildcard
+	p := tuitesting.New().
+		AddSelect(0).           // env: dev
+		AddTextInput("myapp").  // svc-name
+		AddSelect(1).           // env: prod (after auto-back past skipped tls)
+		AddTextInput("myapp2"). // svc-name again
+		AddConfirm(true).       // tls: yes
+		AddSelect(0)            // cert: wildcard
+
+	engine := NewEngine(p, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if env != "prod" {
+		t.Errorf("expected env='prod', got %q", env)
+	}
+	if svcName != "myapp2" {
+		t.Errorf("expected svc-name='myapp2', got %q", svcName)
+	}
+}

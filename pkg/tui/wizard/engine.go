@@ -58,18 +58,19 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	for e.current < len(flow.Steps) {
 		step := flow.Steps[e.current]
 
+		// Check ShouldSkip BEFORE IsSet — a skipped step must be cleared
+		// even if the user provided a value via flag/config.
+		if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
+			e.resetStep(step)
+			e.current++
+			continue
+		}
+
 		if step.IsSet != nil && step.IsSet() {
 			// Propagate the pre-set value so downstream loaders/callbacks can see it.
 			if step.Value != nil {
 				e.collected[step.Name] = step.Value()
 			}
-			e.current++
-			continue
-		}
-
-		if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
-			// Always clear stale values when skipping, even on first pass.
-			e.resetStep(step)
 			e.current++
 			continue
 		}
@@ -104,15 +105,15 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			continue
 		}
 
-		value, err := e.prompt(ctx, step, choices)
+		canGoBack := e.hasEditablePriorStep(flow)
+		value, err := e.prompt(ctx, step, choices, canGoBack)
 		if errors.Is(err, errGoBack) {
 			e.goBack(flow)
 			continue
 		}
-		// Treat Esc/Ctrl+C (context.Canceled) as back-navigation on non-first steps.
-		// On the first step, it aborts the wizard.
+		// Treat Esc/Ctrl+C (context.Canceled) as back-navigation when possible.
 		if errors.Is(err, context.Canceled) {
-			if e.current > 0 {
+			if canGoBack {
 				e.goBack(flow)
 				continue
 			}
@@ -172,8 +173,23 @@ var errGoBack = fmt.Errorf("go back")
 // backLabel is appended to Select/MultiSelect choices when back navigation is possible.
 const backLabel = "← Back"
 
-func (e *Engine) prompt(ctx context.Context, step Step, choices []Choice) (any, error) {
-	canGoBack := e.current > 0
+// hasEditablePriorStep returns true if there is at least one earlier step
+// that is not fixed (IsSet) and not currently skipped (ShouldSkip).
+func (e *Engine) hasEditablePriorStep(flow *Flow) bool {
+	for i := e.current - 1; i >= 0; i-- {
+		step := flow.Steps[i]
+		if step.IsSet != nil && step.IsSet() {
+			continue
+		}
+		if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func (e *Engine) prompt(ctx context.Context, step Step, choices []Choice, canGoBack bool) (any, error) {
 
 	switch step.Prompt {
 	case SelectPrompt:
@@ -301,14 +317,32 @@ func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
 	}
 
 	// No editable dependency found. If all are truly fixed (IsSet), error out.
-	// If some are just skipped (ShouldSkip), fall back to goBack() which will
-	// find the nearest editable step regardless of DependsOn.
 	if allFixed {
 		return fmt.Errorf("step %q has no options available and all its dependencies %v are fixed (set via flag)", current.Name, current.DependsOn)
 	}
 
-	// Dependencies exist but are currently skipped — fall back to regular goBack
-	// which will navigate past skipped steps to the nearest editable one.
+	// Dependencies are currently skipped. Find the earliest editable step
+	// that could change the skip condition. We go to the earliest (not nearest)
+	// because the skip condition typically depends on an earlier choice.
+	if hasSkippedDep {
+		for i := 0; i < e.current; i++ {
+			step := flow.Steps[i]
+			if step.IsSet != nil && step.IsSet() {
+				continue
+			}
+			if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
+				continue
+			}
+			// Found the earliest editable step — rewind to it.
+			for j := i; j < e.current; j++ {
+				e.resetStep(flow.Steps[j])
+			}
+			e.current = i
+			return nil
+		}
+	}
+
+	// Last resort fallback.
 	e.goBack(flow)
 	return nil
 }
