@@ -110,7 +110,7 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			if e.current == 0 {
 				return fmt.Errorf("step %q: no options available and cannot go back", step.Name)
 			}
-			_, _ = fmt.Fprintf(e.out(), "  No options available for %q — going back.\n", step.Description)
+			_, _ = fmt.Fprintf(e.out(), "  No options available for %q — going back.\n", promptLabel(step))
 			if err := e.goBackToDependency(flow, step); err != nil {
 				return fmt.Errorf("step %q: %w", step.Name, err)
 			}
@@ -142,7 +142,7 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 
 		// Enforce required: reject empty values.
 		if step.Required && isEmpty(value) {
-			_, _ = fmt.Fprintf(e.out(), "  %s is required — please provide a value.\n", step.Description)
+			_, _ = fmt.Fprintf(e.out(), "  %s is required — please provide a value.\n", promptLabel(step))
 			continue // re-prompt same step
 		}
 
@@ -207,71 +207,108 @@ func (e *Engine) hasEditablePriorStep(flow *Flow) bool {
 }
 
 func (e *Engine) prompt(ctx context.Context, step Step, choices []Choice, canGoBack bool) (any, error) {
-
 	switch step.Prompt {
 	case SelectPrompt:
-		labels := choiceLabels(choices)
-		if canGoBack {
-			labels = append(labels, backLabel)
-		}
-		idx, err := e.prompter.Select(ctx, step.Description, labels)
-		if err != nil {
-			return nil, err
-		}
-		if canGoBack && idx == len(choices) {
-			return nil, errGoBack
-		}
-		return choices[idx].Value, nil
-
+		return e.promptSelect(ctx, step, choices, canGoBack)
 	case MultiSelectPrompt:
-		labels := choiceLabels(choices)
-		if canGoBack {
-			labels = append(labels, backLabel)
-		}
-		var msOpts []tui.MultiSelectOption
-		if step.Required {
-			msOpts = append(msOpts, tui.WithMinSelections(1))
-		}
-		indices, err := e.prompter.MultiSelect(ctx, step.Description, labels, msOpts...)
-		if err != nil {
-			return nil, err
-		}
-		// If "← Back" is among selected indices, go back.
-		for _, idx := range indices {
-			if canGoBack && idx == len(choices) {
-				return nil, errGoBack
-			}
-		}
-		values := make([]string, len(indices))
-		for i, idx := range indices {
-			values[i] = choices[idx].Value
-		}
-		return values, nil
-
+		return e.promptMultiSelect(ctx, step, choices, canGoBack)
 	case TextInputPrompt:
-		var opts []tui.TextInputOption
-		if step.Default != nil {
-			if d, ok := step.Default(e.collected).(string); ok && d != "" {
-				opts = append(opts, tui.WithDefault(d))
-			}
-		}
-		return e.prompter.TextInput(ctx, step.Description, opts...)
-
+		return e.promptTextInput(ctx, step)
 	case ConfirmPrompt:
-		var cOpts []tui.ConfirmOption
-		if step.Default != nil {
-			if d, ok := step.Default(e.collected).(bool); ok {
-				cOpts = append(cOpts, tui.WithConfirmDefault(d))
-			}
-		}
-		return e.prompter.Confirm(ctx, step.Description, cOpts...)
-
+		return e.promptConfirm(ctx, step)
 	case PasswordPrompt:
-		return e.prompter.Password(ctx, step.Description)
-
+		return e.prompter.Password(ctx, promptLabel(step))
 	default:
 		return nil, fmt.Errorf("unsupported prompt type: %d", step.Prompt)
 	}
+}
+
+func (e *Engine) promptSelect(ctx context.Context, step Step, choices []Choice, canGoBack bool) (any, error) {
+	labels := choiceLabels(choices)
+	if canGoBack {
+		labels = append(labels, backLabel)
+	}
+	var opts []tui.SelectOption
+	if step.Default != nil {
+		if defVal, ok := step.Default(e.collected).(string); ok {
+			for i, c := range choices {
+				if c.Value == defVal {
+					opts = append(opts, tui.WithSelectDefault(i))
+					break
+				}
+			}
+		}
+	}
+	idx, err := e.prompter.Select(ctx, promptLabel(step), labels, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if canGoBack && idx == len(choices) {
+		return nil, errGoBack
+	}
+	return choices[idx].Value, nil
+}
+
+func (e *Engine) promptMultiSelect(ctx context.Context, step Step, choices []Choice, canGoBack bool) (any, error) {
+	labels := choiceLabels(choices)
+	if canGoBack {
+		labels = append(labels, backLabel)
+	}
+	var opts []tui.MultiSelectOption
+	if step.Required {
+		opts = append(opts, tui.WithMinSelections(1))
+	}
+	if step.Default != nil {
+		if defVals, ok := step.Default(e.collected).([]string); ok && len(defVals) > 0 {
+			valSet := make(map[string]bool, len(defVals))
+			for _, v := range defVals {
+				valSet[v] = true
+			}
+			var defaults []int
+			for i, c := range choices {
+				if valSet[c.Value] {
+					defaults = append(defaults, i)
+				}
+			}
+			if len(defaults) > 0 {
+				opts = append(opts, tui.WithMultiSelectDefaults(defaults))
+			}
+		}
+	}
+	indices, err := e.prompter.MultiSelect(ctx, promptLabel(step), labels, opts...)
+	if err != nil {
+		return nil, err
+	}
+	for _, idx := range indices {
+		if canGoBack && idx == len(choices) {
+			return nil, errGoBack
+		}
+	}
+	values := make([]string, len(indices))
+	for i, idx := range indices {
+		values[i] = choices[idx].Value
+	}
+	return values, nil
+}
+
+func (e *Engine) promptTextInput(ctx context.Context, step Step) (any, error) {
+	var opts []tui.TextInputOption
+	if step.Default != nil {
+		if d, ok := step.Default(e.collected).(string); ok && d != "" {
+			opts = append(opts, tui.WithDefault(d))
+		}
+	}
+	return e.prompter.TextInput(ctx, promptLabel(step), opts...)
+}
+
+func (e *Engine) promptConfirm(ctx context.Context, step Step) (any, error) {
+	var opts []tui.ConfirmOption
+	if step.Default != nil {
+		if d, ok := step.Default(e.collected).(bool); ok {
+			opts = append(opts, tui.WithConfirmDefault(d))
+		}
+	}
+	return e.prompter.Confirm(ctx, promptLabel(step), opts...)
 }
 
 func (e *Engine) goBack(flow *Flow) {
@@ -327,6 +364,10 @@ func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
 			hasSkippedDep = true
 			continue // currently hidden — rewinding here would just skip again
 		}
+		if e.autoSkipped[step.Name] {
+			hasSkippedDep = true
+			continue // auto-skipped due to empty loader — not editable
+		}
 		if nearestEditable == -1 || i > nearestEditable {
 			nearestEditable = i
 		}
@@ -357,6 +398,9 @@ func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
 				continue
 			}
 			if step.ShouldSkip != nil && step.ShouldSkip(e.collected) {
+				continue
+			}
+			if e.autoSkipped[step.Name] {
 				continue
 			}
 			// Found the earliest editable step — rewind to it.
@@ -401,6 +445,14 @@ func (e *Engine) resetStep(step Step) {
 	if step.Resetter != nil {
 		step.Resetter()
 	}
+}
+
+// promptLabel returns the display text for a step, falling back to Name if Description is empty.
+func promptLabel(step Step) string {
+	if step.Description != "" {
+		return step.Description
+	}
+	return step.Name
 }
 
 func choiceLabels(choices []Choice) []string {

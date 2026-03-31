@@ -1606,3 +1606,108 @@ func TestEngine_ConfirmDefaultHonored(t *testing.T) {
 		t.Error("expected tls=true")
 	}
 }
+
+func TestEngine_AutoSkippedDepNotRewindTarget(t *testing.T) {
+	// Flow: addon(optional, empty loader) -> addon-config(required, dependsOn addon, empty)
+	// addon is auto-skipped. addon-config has no choices.
+	// Should error, not loop to auto-skipped addon.
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "addon",
+				Prompt:   SelectPrompt,
+				Required: false,
+				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+					return []Choice{}, nil
+				},
+				Setter: func(v any) {},
+			},
+			{
+				Name:      "addon-config",
+				Prompt:    SelectPrompt,
+				Required:  true,
+				DependsOn: []string{"addon"},
+				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+					return []Choice{}, nil
+				},
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	p := tuitesting.New()
+	engine := NewEngine(p, WithOutput(io.Discard))
+
+	err := engine.Run(context.Background(), flow)
+	if err == nil {
+		t.Fatal("expected error, not infinite loop")
+	}
+}
+
+func TestEngine_NameFallbackWhenDescriptionEmpty(t *testing.T) {
+	// Step with no Description should use Name in prompts without panicking.
+	var val string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				// Description intentionally empty
+				Loader: StaticChoices(Choice{Label: "A", Value: "a"}),
+				Setter: func(v any) { val = v.(string) },
+			},
+		},
+	}
+
+	p := tuitesting.New().AddSelect(0)
+	engine := NewEngine(p, WithOutput(io.Discard))
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val != "a" {
+		t.Errorf("expected 'a', got %q", val)
+	}
+}
+
+func TestEngine_SelectDefaultForwarded(t *testing.T) {
+	// Default on SelectPrompt should forward to the prompter.
+	// The test prompter ignores defaults (returns queued index), but
+	// we verify the engine doesn't error and the flow completes.
+	var val string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "size",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Default:  func(_ map[string]any) any { return "medium" },
+				Loader: StaticChoices(
+					Choice{Label: "Small", Value: "small"},
+					Choice{Label: "Medium", Value: "medium"},
+					Choice{Label: "Large", Value: "large"},
+				),
+				Setter: func(v any) { val = v.(string) },
+			},
+		},
+	}
+
+	// Select index 1 (medium — matches default).
+	p := tuitesting.New().AddSelect(1)
+	engine := NewEngine(p, WithOutput(io.Discard))
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val != "medium" {
+		t.Errorf("expected 'medium', got %q", val)
+	}
+}
