@@ -1,6 +1,6 @@
-# Verdastack
+# VerdaGoStack
 
-Shared Go libraries for the Verdastack platform.
+Shared Go libraries for the Verda platform.
 
 - **Module**: `github.com/verda-cloud/verdagostack`
 - **Language**: Go 1.25+
