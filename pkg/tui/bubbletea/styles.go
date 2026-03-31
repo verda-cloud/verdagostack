@@ -1,6 +1,11 @@
 package bubbletea
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"io"
+	"os"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Theme defines the color palette for all TUI prompts.
 type Theme struct {
@@ -56,10 +61,22 @@ var (
 // activeTheme is the current theme. Defaults to ThemeDefault.
 var activeTheme = ThemeDefault
 
+// styleRenderer is the lipgloss renderer used for all styles.
+// Defaults to os.Stdout. Call SetOutput to change it.
+var styleRenderer = lipgloss.NewRenderer(os.Stdout)
+
 // SetTheme changes the color theme for all TUI prompts.
 // Call this before creating any prompts (typically in main or init).
 func SetTheme(t Theme) {
 	activeTheme = t
+	applyTheme()
+}
+
+// SetOutput configures the output writer for style rendering.
+// This ensures color detection matches the actual output destination.
+// Call this before creating any prompts if output is redirected.
+func SetOutput(w io.Writer) {
+	styleRenderer = lipgloss.NewRenderer(w)
 	applyTheme()
 }
 
@@ -83,14 +100,15 @@ func init() {
 
 func applyTheme() {
 	t := activeTheme
-	promptStyle = lipgloss.NewStyle().Foreground(t.Success).Bold(true)
-	titleStyle = lipgloss.NewStyle().Bold(true)
-	answerStyle = lipgloss.NewStyle().Foreground(t.Accent)
-	cursorStyle = lipgloss.NewStyle().Foreground(t.Accent)
-	selectedStyle = lipgloss.NewStyle().Foreground(t.Accent)
-	dimStyle = lipgloss.NewStyle().Foreground(t.Dim)
-	checkStyle = lipgloss.NewStyle().Foreground(t.Success)
-	uncheckStyle = lipgloss.NewStyle().Foreground(t.Dim)
-	errorStyle = lipgloss.NewStyle().Foreground(t.Error)
-	hintStyle = lipgloss.NewStyle().Foreground(t.Dim)
+	r := styleRenderer
+	promptStyle = r.NewStyle().Foreground(t.Success).Bold(true)
+	titleStyle = r.NewStyle().Bold(true)
+	answerStyle = r.NewStyle().Foreground(t.Accent)
+	cursorStyle = r.NewStyle().Foreground(t.Accent)
+	selectedStyle = r.NewStyle().Foreground(t.Accent)
+	dimStyle = r.NewStyle().Foreground(t.Dim)
+	checkStyle = r.NewStyle().Foreground(t.Success)
+	uncheckStyle = r.NewStyle().Foreground(t.Dim)
+	errorStyle = r.NewStyle().Foreground(t.Error)
+	hintStyle = r.NewStyle().Foreground(t.Dim)
 }

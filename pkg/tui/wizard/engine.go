@@ -98,33 +98,11 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		}
 
 		if step.Loader != nil && len(choices) == 0 {
-			if !step.Required {
-				// Optional step with empty choices — apply default or reset and skip.
-				if step.Default != nil {
-					val := step.Default(e.collected)
-					if step.Setter != nil {
-						step.Setter(val)
-					}
-					e.collected[step.Name] = val
-				} else {
-					e.resetStep(step)
-				}
-				e.autoSkipped[step.Name] = true
-				e.current++
+			if handled, err := e.handleEmptyChoices(flow, step); err != nil {
+				return err
+			} else if handled {
 				continue
 			}
-			if e.current == 0 {
-				return fmt.Errorf("step %q: no options available and cannot go back", step.Name)
-			}
-			e.rewindCount[step.Name]++
-			if e.rewindCount[step.Name] > maxRewindsPerStep {
-				return fmt.Errorf("step %q: no options available after %d attempts — the flow cannot proceed with current inputs", step.Name, maxRewindsPerStep)
-			}
-			_, _ = fmt.Fprintf(e.out(), "  No options available for %q — going back.\n", promptLabel(step))
-			if err := e.goBackToDependency(flow, step); err != nil {
-				return fmt.Errorf("step %q: %w", step.Name, err)
-			}
-			continue
 		}
 
 		canGoBack := e.hasEditablePriorStep(flow)
@@ -133,8 +111,13 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			e.goBack(flow)
 			continue
 		}
-		// Treat Esc/Ctrl+C (context.Canceled) as back-navigation when possible.
+		// Distinguish real context cancellation from user Esc/Ctrl+C.
+		// If the parent context is done, abort immediately without mutating state.
 		if errors.Is(err, context.Canceled) {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			// User-initiated Esc — treat as back-navigation when possible.
 			if canGoBack {
 				e.goBack(flow)
 				continue
@@ -189,6 +172,38 @@ func (e *Engine) loadStep(ctx context.Context, step Step) ([]Choice, error) {
 	}
 	e.cache.set(step.Name, deps, choices)
 	return choices, nil
+}
+
+// handleEmptyChoices handles the case when a step's loader returns no choices.
+// Returns (true, nil) if the step was handled (skip or rewind), (false, nil) to
+// continue normal prompting, or (false, err) on unrecoverable error.
+func (e *Engine) handleEmptyChoices(flow *Flow, step Step) (bool, error) {
+	if !step.Required {
+		if step.Default != nil {
+			val := step.Default(e.collected)
+			if step.Setter != nil {
+				step.Setter(val)
+			}
+			e.collected[step.Name] = val
+		} else {
+			e.resetStep(step)
+		}
+		e.autoSkipped[step.Name] = true
+		e.current++
+		return true, nil
+	}
+	if e.current == 0 {
+		return false, fmt.Errorf("step %q: no options available and cannot go back", step.Name)
+	}
+	e.rewindCount[step.Name]++
+	if e.rewindCount[step.Name] > maxRewindsPerStep {
+		return false, fmt.Errorf("step %q: no options available after %d attempts — the flow cannot proceed with current inputs", step.Name, maxRewindsPerStep)
+	}
+	_, _ = fmt.Fprintf(e.out(), "  No options available for %q — going back.\n", promptLabel(step))
+	if err := e.goBackToDependency(flow, step); err != nil {
+		return false, fmt.Errorf("step %q: %w", step.Name, err)
+	}
+	return true, nil
 }
 
 // errGoBack is a sentinel indicating the user chose to go back.
@@ -340,8 +355,13 @@ func (e *Engine) goBack(flow *Flow) {
 			continue
 		}
 		// Clear the destination step and all steps after it up to where we came from.
+		// Skip fixed (IsSet) steps — their values must be preserved.
 		for j := e.current; j < from; j++ {
-			e.resetStep(flow.Steps[j])
+			s := flow.Steps[j]
+			if s.IsSet != nil && s.IsSet() {
+				continue
+			}
+			e.resetStep(s)
 		}
 		return
 	}
@@ -391,9 +411,13 @@ func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
 	allFixed := hasFixedDep && !hasSkippedDep && nearestEditable < 0
 
 	if nearestEditable >= 0 {
-		// Clear everything from the editable dep up to current.
+		// Clear everything from the editable dep up to current, skipping fixed steps.
 		for j := nearestEditable; j < e.current; j++ {
-			e.resetStep(flow.Steps[j])
+			s := flow.Steps[j]
+			if s.IsSet != nil && s.IsSet() {
+				continue
+			}
+			e.resetStep(s)
 		}
 		e.current = nearestEditable
 		return nil
@@ -418,9 +442,13 @@ func (e *Engine) goBackToDependency(flow *Flow, current Step) error {
 			if e.autoSkipped[step.Name] {
 				continue
 			}
-			// Found the earliest editable step — rewind to it.
+			// Found the earliest editable step — rewind to it, skipping fixed steps.
 			for j := i; j < e.current; j++ {
-				e.resetStep(flow.Steps[j])
+				s := flow.Steps[j]
+				if s.IsSet != nil && s.IsSet() {
+					continue
+				}
+				e.resetStep(s)
 			}
 			e.current = i
 			return nil
