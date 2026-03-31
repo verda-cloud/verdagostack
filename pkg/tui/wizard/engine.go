@@ -25,7 +25,8 @@ const (
 type stepRuntime struct {
 	state       stepState
 	value       any      // the collected value
-	choices     []Choice // cached loader results (nil = not loaded)
+	choices     []Choice // cached loader results
+	loaded      bool     // true if loader has been called (distinguishes nil from not-loaded)
 	rewindCount int      // how many times auto-rewind has targeted this step
 }
 
@@ -264,6 +265,7 @@ func (e *Engine) transition(idx int, newState stepState, value any) {
 	rt.state = newState
 	rt.value = value
 	rt.choices = nil // invalidate cached choices
+	rt.loaded = false
 }
 
 // resetRange resets all non-fixed steps in [from, to) to statePending.
@@ -284,7 +286,7 @@ func (e *Engine) rewindOne() {
 	e.current--
 	for e.current >= 0 {
 		if e.isEditable(e.current) {
-			e.resetRange(e.current, from)
+			e.resetRange(e.current, from+1) // +1 to include the abandoned step
 			return
 		}
 		e.current--
@@ -338,11 +340,13 @@ func (e *Engine) rewindToDependency(current Step) error {
 		return fmt.Errorf("step %q has no options available and all its dependencies %v are fixed (set via flag)", current.Name, current.DependsOn)
 	}
 
-	// Deps are skipped — find the earliest editable step that could change the outcome.
+	// Deps are skipped — find the earliest editable step that could change
+	// the skip condition. We use earliest (not nearest) because the skip
+	// condition typically depends on an earlier choice like "environment".
 	if hasSkipped {
 		for i := 0; i < e.current; i++ {
 			if e.isEditable(i) {
-				e.resetRange(i, e.current)
+				e.resetRange(i, e.current+1)
 				e.current = i
 				return nil
 			}
@@ -389,9 +393,9 @@ func (e *Engine) loadChoices(ctx context.Context, step Step) ([]Choice, error) {
 		return nil, nil
 	}
 
-	// Check cache.
+	// Check cache — loaded distinguishes "not yet called" from "called, returned nil".
 	rt := &e.steps[e.current]
-	if rt.choices != nil {
+	if rt.loaded {
 		return rt.choices, nil
 	}
 
@@ -401,6 +405,7 @@ func (e *Engine) loadChoices(ctx context.Context, step Step) ([]Choice, error) {
 		return nil, err
 	}
 	rt.choices = choices
+	rt.loaded = true
 	return choices, nil
 }
 
@@ -409,7 +414,8 @@ func (e *Engine) invalidateDownstream(changedIdx int) {
 	for i, step := range e.flow.Steps {
 		for _, dep := range step.DependsOn {
 			if dep == changedName {
-				e.steps[i].choices = nil // clear cached choices
+				e.steps[i].choices = nil
+				e.steps[i].loaded = false
 				break
 			}
 		}

@@ -1377,14 +1377,16 @@ func TestEngine_SkippedDepChainRewindsToController(t *testing.T) {
 		},
 	}
 
-	// 1: env=dev, svc-name="myapp" → tls skipped → cert empty → auto-back to env
+	// 1: env=dev, svc-name="myapp" → tls skipped → cert empty
+	//    → auto-back to env (nearest editable before skipped dep tls)
+	//    → resets env, svc-name, tls, cert
 	// 2: env=prod, svc-name="myapp2" → tls=yes → cert=wildcard
 	p := tuitesting.New().
 		AddSelect(0).           // env: dev
 		AddTextInput("myapp").  // svc-name
-		AddSelect(1).           // env: prod (after auto-back past skipped tls)
-		AddTextInput("myapp2"). // svc-name again
-		AddConfirm(true).       // tls: yes
+		AddSelect(1).           // env: prod (after auto-back to earliest editable = env)
+		AddTextInput("myapp2"). // svc-name again (was reset)
+		AddConfirm(true).       // tls: yes (not skipped for prod)
 		AddSelect(0)            // cert: wildcard
 
 	engine := NewEngine(p, WithOutput(io.Discard))
