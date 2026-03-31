@@ -24,6 +24,9 @@ func New(ioOpts ...func(*Prompter)) *Prompter {
 	for _, o := range ioOpts {
 		o(p)
 	}
+	// Sync the style renderer with the prompter's output writer
+	// so color detection matches the actual output destination.
+	SetOutput(p.out)
 	return p
 }
 
