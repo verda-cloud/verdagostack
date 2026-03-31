@@ -79,8 +79,13 @@ func (e *Engine) buildCollected() map[string]any {
 	}
 	result := make(map[string]any)
 	for i, rt := range e.steps {
-		if rt.state == stateCompleted || rt.state == stateFixed {
+		switch rt.state {
+		case stateCompleted, stateFixed:
 			result[e.flow.Steps[i].Name] = rt.value
+		case stateAutoSkipped:
+			if rt.value != nil {
+				result[e.flow.Steps[i].Name] = rt.value
+			}
 		}
 	}
 	return result
@@ -141,6 +146,9 @@ func (e *Engine) handleFixed(step Step) error {
 			if err := step.Validate(val); err != nil {
 				return fmt.Errorf("step %q: preset value invalid: %w", step.Name, err)
 			}
+		}
+		if step.Setter != nil {
+			step.Setter(val)
 		}
 		e.steps[e.current].state = stateFixed
 		e.steps[e.current].value = val
