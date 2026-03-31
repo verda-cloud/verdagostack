@@ -29,23 +29,39 @@ type recorder struct {
 	entries []entry
 }
 
-func (r *recorder) reset()                              { r.entries = nil }
-func (r *recorder) Debugf(f string, a ...any)           { r.entries = append(r.entries, entry{level: "debug", format: f, args: a}) }
-func (r *recorder) Infof(f string, a ...any)            { r.entries = append(r.entries, entry{level: "info", format: f, args: a}) }
-func (r *recorder) Warnf(f string, a ...any)            { r.entries = append(r.entries, entry{level: "warn", format: f, args: a}) }
-func (r *recorder) Errorf(f string, a ...any)           { r.entries = append(r.entries, entry{level: "error", format: f, args: a}) }
-func (r *recorder) Panicf(_ string, _ ...any)           {}
-func (r *recorder) Fatalf(_ string, _ ...any)           {}
-func (r *recorder) Debugw(m string, kv ...any)          { r.entries = append(r.entries, entry{level: "debug", msg: m, kvs: kv}) }
-func (r *recorder) Infow(m string, kv ...any)           { r.entries = append(r.entries, entry{level: "info", msg: m, kvs: kv}) }
-func (r *recorder) Warnw(m string, kv ...any)           { r.entries = append(r.entries, entry{level: "warn", msg: m, kvs: kv}) }
-func (r *recorder) Errorw(m string, kv ...any)          { r.entries = append(r.entries, entry{level: "error", msg: m, kvs: kv}) }
-func (r *recorder) Panicw(_ string, _ ...any)           {}
-func (r *recorder) Fatalw(_ string, _ ...any)           {}
-func (r *recorder) W(_ context.Context) log.Logger      { return r }
-func (r *recorder) With(_ ...any) log.Logger            { return r }
-func (r *recorder) AddCallerSkip(_ int) log.Logger      { return r }
-func (r *recorder) Sync()                               {}
+func (r *recorder) reset() { r.entries = nil }
+func (r *recorder) Debugf(f string, a ...any) {
+	r.entries = append(r.entries, entry{level: "debug", format: f, args: a})
+}
+func (r *recorder) Infof(f string, a ...any) {
+	r.entries = append(r.entries, entry{level: "info", format: f, args: a})
+}
+func (r *recorder) Warnf(f string, a ...any) {
+	r.entries = append(r.entries, entry{level: "warn", format: f, args: a})
+}
+func (r *recorder) Errorf(f string, a ...any) {
+	r.entries = append(r.entries, entry{level: "error", format: f, args: a})
+}
+func (r *recorder) Panicf(_ string, _ ...any) {}
+func (r *recorder) Fatalf(_ string, _ ...any) {}
+func (r *recorder) Debugw(m string, kv ...any) {
+	r.entries = append(r.entries, entry{level: "debug", msg: m, kvs: kv})
+}
+func (r *recorder) Infow(m string, kv ...any) {
+	r.entries = append(r.entries, entry{level: "info", msg: m, kvs: kv})
+}
+func (r *recorder) Warnw(m string, kv ...any) {
+	r.entries = append(r.entries, entry{level: "warn", msg: m, kvs: kv})
+}
+func (r *recorder) Errorw(m string, kv ...any) {
+	r.entries = append(r.entries, entry{level: "error", msg: m, kvs: kv})
+}
+func (r *recorder) Panicw(_ string, _ ...any)      {}
+func (r *recorder) Fatalw(_ string, _ ...any)      {}
+func (r *recorder) W(_ context.Context) log.Logger { return r }
+func (r *recorder) With(_ ...any) log.Logger       { return r }
+func (r *recorder) AddCallerSkip(_ int) log.Logger { return r }
+func (r *recorder) Sync()                          {}
 
 var _ log.Logger = (*recorder)(nil)
 

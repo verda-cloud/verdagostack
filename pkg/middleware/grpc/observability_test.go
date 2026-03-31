@@ -13,8 +13,11 @@ type fakeServerTransportStream struct {
 	headers metadata.MD
 }
 
-func (f *fakeServerTransportStream) Method() string                  { return "/test.Service/Method" }
-func (f *fakeServerTransportStream) SetHeader(md metadata.MD) error  { f.headers = metadata.Join(f.headers, md); return nil }
+func (f *fakeServerTransportStream) Method() string { return "/test.Service/Method" }
+func (f *fakeServerTransportStream) SetHeader(md metadata.MD) error {
+	f.headers = metadata.Join(f.headers, md)
+	return nil
+}
 func (f *fakeServerTransportStream) SendHeader(md metadata.MD) error { return nil }
 func (f *fakeServerTransportStream) SetTrailer(md metadata.MD) error { return nil }
 

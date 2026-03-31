@@ -17,6 +17,14 @@ setup: ## Complete development environment setup (installs only what's needed)
 		echo "✓ golangci-lint already installed ($$(golangci-lint --version))"; \
 	fi
 	@echo ""
+	@if ! command -v goimports >/dev/null 2>&1; then \
+		echo "Installing goimports..."; \
+		go install golang.org/x/tools/cmd/goimports@latest; \
+		echo "✓ goimports installed"; \
+	else \
+		echo "✓ goimports already installed"; \
+	fi
+	@echo ""
 	@if command -v pre-commit >/dev/null 2>&1; then \
 		if [ ! -f .git/hooks/pre-commit ]; then \
 			echo "Installing pre-commit hooks..."; \

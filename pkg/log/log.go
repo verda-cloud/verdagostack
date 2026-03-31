@@ -139,21 +139,21 @@ func (l *zapLogger) Options() *Options { return l.opts }
 
 // --- Package-level convenience functions (delegate to global logger) ---
 
-func Debugf(format string, args ...any)            { std.Debugf(format, args...) }
-func Debugw(msg string, keysAndValues ...any)       { std.Debugw(msg, keysAndValues...) }
-func Infof(format string, args ...any)              { std.Infof(format, args...) }
-func Infow(msg string, keysAndValues ...any)        { std.Infow(msg, keysAndValues...) }
-func Warnf(format string, args ...any)              { std.Warnf(format, args...) }
-func Warnw(msg string, keysAndValues ...any)        { std.Warnw(msg, keysAndValues...) }
-func Errorf(format string, args ...any)             { std.Errorf(format, args...) }
-func Errorw(msg string, keysAndValues ...any)       { std.Errorw(msg, keysAndValues...) }
-func Panicf(format string, args ...any)             { std.Panicf(format, args...) }
-func Panicw(msg string, keysAndValues ...any)       { std.Panicw(msg, keysAndValues...) }
-func Fatalf(format string, args ...any)             { std.Fatalf(format, args...) }
-func Fatalw(msg string, keysAndValues ...any)       { std.Fatalw(msg, keysAndValues...) }
-func W(ctx context.Context) Logger                  { return std.W(ctx) }
-func With(keysAndValues ...any) Logger              { return std.With(keysAndValues...) }
-func AddCallerSkip(skip int) Logger                 { return std.AddCallerSkip(skip) }
+func Debugf(format string, args ...any)       { std.Debugf(format, args...) }
+func Debugw(msg string, keysAndValues ...any) { std.Debugw(msg, keysAndValues...) }
+func Infof(format string, args ...any)        { std.Infof(format, args...) }
+func Infow(msg string, keysAndValues ...any)  { std.Infow(msg, keysAndValues...) }
+func Warnf(format string, args ...any)        { std.Warnf(format, args...) }
+func Warnw(msg string, keysAndValues ...any)  { std.Warnw(msg, keysAndValues...) }
+func Errorf(format string, args ...any)       { std.Errorf(format, args...) }
+func Errorw(msg string, keysAndValues ...any) { std.Errorw(msg, keysAndValues...) }
+func Panicf(format string, args ...any)       { std.Panicf(format, args...) }
+func Panicw(msg string, keysAndValues ...any) { std.Panicw(msg, keysAndValues...) }
+func Fatalf(format string, args ...any)       { std.Fatalf(format, args...) }
+func Fatalw(msg string, keysAndValues ...any) { std.Fatalw(msg, keysAndValues...) }
+func W(ctx context.Context) Logger            { return std.W(ctx) }
+func With(keysAndValues ...any) Logger        { return std.With(keysAndValues...) }
+func AddCallerSkip(skip int) Logger           { return std.AddCallerSkip(skip) }
 
 // --- zapLogger method implementations ---
 

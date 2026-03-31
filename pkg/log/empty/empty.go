@@ -32,7 +32,7 @@ func (l *EmptyLogger) Errorw(_ string, _ ...any) {}
 func (l *EmptyLogger) Panicw(_ string, _ ...any) {}
 func (l *EmptyLogger) Fatalw(_ string, _ ...any) {}
 
-func (l *EmptyLogger) W(_ context.Context) log.Logger  { return l }
-func (l *EmptyLogger) With(_ ...any) log.Logger         { return l }
-func (l *EmptyLogger) AddCallerSkip(_ int) log.Logger   { return l }
-func (l *EmptyLogger) Sync()                            {}
+func (l *EmptyLogger) W(_ context.Context) log.Logger { return l }
+func (l *EmptyLogger) With(_ ...any) log.Logger       { return l }
+func (l *EmptyLogger) AddCallerSkip(_ int) log.Logger { return l }
+func (l *EmptyLogger) Sync()                          {}

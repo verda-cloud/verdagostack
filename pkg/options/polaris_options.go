@@ -21,9 +21,9 @@ type ProviderOptions struct {
 
 // PolarisOptions defines options for the Polaris service discovery.
 type PolarisOptions struct {
-	Addr       string        `json:"addr" mapstructure:"addr"`
-	Timeout    time.Duration `json:"timeout" mapstructure:"timeout"`
-	RetryCount int           `json:"retry-count" mapstructure:"retry-count"`
+	Addr       string          `json:"addr" mapstructure:"addr"`
+	Timeout    time.Duration   `json:"timeout" mapstructure:"timeout"`
+	RetryCount int             `json:"retry-count" mapstructure:"retry-count"`
 	Provider   ProviderOptions `json:"provider" mapstructure:"provider"`
 }
 
