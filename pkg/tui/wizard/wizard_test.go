@@ -1,6 +1,9 @@
 package wizard
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestPromptType_Constants(t *testing.T) {
 	types := []PromptType{
@@ -56,5 +59,22 @@ func TestFlow_Fields(t *testing.T) {
 	}
 	if len(f.Steps) != 2 {
 		t.Errorf("expected 2 steps, got %d", len(f.Steps))
+	}
+}
+
+func TestStaticChoices(t *testing.T) {
+	loader := StaticChoices(
+		Choice{Label: "A", Value: "a"},
+		Choice{Label: "B", Value: "b"},
+	)
+	choices, err := loader(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(choices) != 2 {
+		t.Fatalf("expected 2 choices, got %d", len(choices))
+	}
+	if choices[0].Value != "a" || choices[1].Value != "b" {
+		t.Error("unexpected choice values")
 	}
 }

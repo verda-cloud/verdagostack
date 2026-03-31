@@ -50,3 +50,11 @@ type Flow struct {
 	Name  string
 	Steps []Step
 }
+
+// StaticChoices returns a LoaderFunc that always returns the given choices.
+// Use for steps with fixed options that don't require an API call.
+func StaticChoices(choices ...Choice) LoaderFunc {
+	return func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+		return choices, nil
+	}
+}
