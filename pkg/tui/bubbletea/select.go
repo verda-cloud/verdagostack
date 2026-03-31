@@ -69,18 +69,18 @@ func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m selectModel) View() string {
 	if m.chosen {
-		return fmt.Sprintf("? %s %s\n", m.prompt, m.choices[m.cursor])
+		return fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(m.choices[m.cursor]))
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "? %s\n", m.prompt)
+	fmt.Fprintf(&b, "%s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt))
 
 	start, end := m.visibleRange()
 	for i := start; i < end; i++ {
 		if i == m.cursor {
-			fmt.Fprintf(&b, "  > %s\n", m.choices[i])
+			fmt.Fprintf(&b, "  %s %s\n", cursorStyle.Render(">"), selectedStyle.Render(m.choices[i]))
 		} else {
-			fmt.Fprintf(&b, "    %s\n", m.choices[i])
+			fmt.Fprintf(&b, "    %s\n", dimStyle.Render(m.choices[i]))
 		}
 	}
 	return b.String()

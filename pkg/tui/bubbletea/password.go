@@ -49,9 +49,9 @@ func (m passwordModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m passwordModel) View() string {
 	if m.submitted {
-		return fmt.Sprintf("? %s [hidden]\n", m.prompt)
+		return fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), hintStyle.Render("[hidden]"))
 	}
-	return fmt.Sprintf("? %s\n%s", m.prompt, m.textInput.View())
+	return fmt.Sprintf("%s %s\n%s", promptStyle.Render("?"), titleStyle.Render(m.prompt), m.textInput.View())
 }
 
 // Password implements tui.Prompter.

@@ -98,27 +98,32 @@ func (m multiSelectModel) View() string {
 				names = append(names, c)
 			}
 		}
-		return fmt.Sprintf("? %s %s\n", m.prompt, strings.Join(names, ", "))
+		return fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(strings.Join(names, ", ")))
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "? %s (space to toggle, enter to confirm)\n", m.prompt)
+	fmt.Fprintf(&b, "%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), hintStyle.Render("(space to toggle, enter to confirm)"))
 
 	start, end := m.visibleRange()
 	for i := start; i < end; i++ {
-		cursor := "  "
+		cur := "  "
 		if i == m.cursor {
-			cursor = "> "
+			cur = cursorStyle.Render("> ")
 		}
-		check := "[ ]"
+		check := uncheckStyle.Render("[ ]")
+		label := dimStyle.Render(m.choices[i])
 		if m.selected[i] {
-			check = "[x]"
+			check = checkStyle.Render("[x]")
+			label = selectedStyle.Render(m.choices[i])
 		}
-		fmt.Fprintf(&b, "  %s%s %s\n", cursor, check, m.choices[i])
+		if i == m.cursor && !m.selected[i] {
+			label = selectedStyle.Render(m.choices[i])
+		}
+		fmt.Fprintf(&b, "  %s%s %s\n", cur, check, label)
 	}
 
 	if m.err != "" {
-		fmt.Fprintf(&b, "  ✗ %s\n", m.err)
+		fmt.Fprintf(&b, "  %s\n", errorStyle.Render("✗ "+m.err))
 	}
 	return b.String()
 }

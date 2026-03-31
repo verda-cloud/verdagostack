@@ -58,9 +58,9 @@ func (m confirmModel) View() string {
 		if m.value {
 			answer = "Yes"
 		}
-		return fmt.Sprintf("? %s %s\n", m.prompt, answer)
+		return fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(answer))
 	}
-	return fmt.Sprintf("? %s [%s] ", m.prompt, hint)
+	return fmt.Sprintf("%s %s %s ", promptStyle.Render("?"), titleStyle.Render(m.prompt), hintStyle.Render("["+hint+"]"))
 }
 
 // Confirm implements tui.Prompter.

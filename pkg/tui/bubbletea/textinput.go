@@ -61,11 +61,11 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m textInputModel) View() string {
 	if m.submitted {
-		return fmt.Sprintf("? %s %s\n", m.prompt, m.textInput.Value())
+		return fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(m.textInput.Value()))
 	}
-	s := fmt.Sprintf("? %s\n%s", m.prompt, m.textInput.View())
+	s := fmt.Sprintf("%s %s\n%s", promptStyle.Render("?"), titleStyle.Render(m.prompt), m.textInput.View())
 	if m.err != nil {
-		s += fmt.Sprintf("\n  ✗ %s", m.err.Error())
+		s += fmt.Sprintf("\n  %s", errorStyle.Render("✗ "+m.err.Error()))
 	}
 	return s
 }
