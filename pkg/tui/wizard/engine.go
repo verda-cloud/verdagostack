@@ -2,6 +2,7 @@ package wizard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
@@ -59,6 +60,10 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		}
 
 		value, err := e.prompt(ctx, step, choices)
+		if errors.Is(err, errGoBack) {
+			e.goBack(flow)
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("step %q: %w", step.Name, err)
 		}
@@ -97,21 +102,44 @@ func (e *Engine) loadStep(ctx context.Context, step Step) ([]Choice, error) {
 	return choices, nil
 }
 
+// errGoBack is a sentinel indicating the user chose to go back.
+var errGoBack = fmt.Errorf("go back")
+
+// backLabel is appended to Select/MultiSelect choices when back navigation is possible.
+const backLabel = "← Back"
+
 func (e *Engine) prompt(ctx context.Context, step Step, choices []Choice) (any, error) {
+	canGoBack := e.current > 0
+
 	switch step.Prompt {
 	case SelectPrompt:
 		labels := choiceLabels(choices)
+		if canGoBack {
+			labels = append(labels, backLabel)
+		}
 		idx, err := e.prompter.Select(ctx, step.Description, labels)
 		if err != nil {
 			return nil, err
+		}
+		if canGoBack && idx == len(choices) {
+			return nil, errGoBack
 		}
 		return choices[idx].Value, nil
 
 	case MultiSelectPrompt:
 		labels := choiceLabels(choices)
+		if canGoBack {
+			labels = append(labels, backLabel)
+		}
 		indices, err := e.prompter.MultiSelect(ctx, step.Description, labels)
 		if err != nil {
 			return nil, err
+		}
+		// If "← Back" is among selected indices, go back.
+		for _, idx := range indices {
+			if canGoBack && idx == len(choices) {
+				return nil, errGoBack
+			}
 		}
 		values := make([]string, len(indices))
 		for i, idx := range indices {

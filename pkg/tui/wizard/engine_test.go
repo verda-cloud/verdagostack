@@ -538,3 +538,90 @@ func TestEngine_FullFlow_VMCreate(t *testing.T) {
 		t.Errorf("hostname: got %q", hostname)
 	}
 }
+
+func TestEngine_UserInitiatedBack(t *testing.T) {
+	var region, gpu string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "Finland", Value: "FIN-01"},
+					Choice{Label: "Sweden", Value: "SWE-01"},
+				),
+				Setter: func(v any) { region = v.(string) },
+			},
+			{
+				Name:      "gpu",
+				Prompt:    SelectPrompt,
+				Required:  true,
+				DependsOn: []string{"region"},
+				Loader: StaticChoices(
+					Choice{Label: "H100", Value: "h100"},
+					Choice{Label: "A100", Value: "a100"},
+				),
+				Setter: func(v any) { gpu = v.(string) },
+			},
+		},
+	}
+
+	// Step 1: select Finland (idx 0)
+	// Step 2: select "← Back" (idx 2 = last, after h100 and a100)
+	// Step 1 again: select Sweden (idx 1)
+	// Step 2 again: select A100 (idx 1)
+	p := tuitesting.New().
+		AddSelect(0). // region: Finland
+		AddSelect(2). // gpu: ← Back
+		AddSelect(1). // region: Sweden
+		AddSelect(1)  // gpu: A100
+
+	engine := NewEngine(p)
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if region != "SWE-01" {
+		t.Errorf("expected region 'SWE-01', got %q", region)
+	}
+	if gpu != "a100" {
+		t.Errorf("expected gpu 'a100', got %q", gpu)
+	}
+}
+
+func TestEngine_BackNotShownOnFirstStep(t *testing.T) {
+	// First step has 2 choices. If "← Back" were added, index 2 would be valid.
+	// Since it's the first step, "← Back" should NOT be added, so index 2 is out of bounds.
+	// We select index 0 which should work fine.
+	var val string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "first",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "A", Value: "a"},
+					Choice{Label: "B", Value: "b"},
+				),
+				Setter: func(v any) { val = v.(string) },
+			},
+		},
+	}
+
+	p := tuitesting.New().AddSelect(0)
+	engine := NewEngine(p)
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val != "a" {
+		t.Errorf("expected 'a', got %q", val)
+	}
+}
