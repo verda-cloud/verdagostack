@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -36,7 +36,7 @@ func (m textInputModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case keyEnter:
 			if m.validate != nil {
@@ -59,15 +59,15 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m textInputModel) View() string {
+func (m textInputModel) View() tea.View {
 	if m.submitted {
-		return fmt.Sprintf("? %s %s\n", m.prompt, m.textInput.Value())
+		return tea.NewView(fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(m.textInput.Value())))
 	}
-	s := fmt.Sprintf("? %s\n%s", m.prompt, m.textInput.View())
+	s := fmt.Sprintf("%s %s\n%s", promptStyle.Render("?"), titleStyle.Render(m.prompt), m.textInput.View())
 	if m.err != nil {
-		s += fmt.Sprintf("\n  ✗ %s", m.err.Error())
+		s += fmt.Sprintf("\n  %s", errorStyle.Render("✗ "+m.err.Error()))
 	}
-	return s
+	return tea.NewView(s)
 }
 
 // TextInput implements tui.Prompter.

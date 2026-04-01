@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -54,7 +54,7 @@ func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if msg.String() == keyCtrlC {
 			m.done = true
 			m.finalMessage = m.message
@@ -64,11 +64,11 @@ func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m spinnerModel) View() string {
+func (m spinnerModel) View() tea.View {
 	if m.done {
-		return fmt.Sprintf("%s %s\n", m.doneSymbol, m.finalMessage)
+		return tea.NewView(fmt.Sprintf("%s %s\n", m.doneSymbol, m.finalMessage))
 	}
-	return fmt.Sprintf("%s %s", m.spinner.View(), m.message)
+	return tea.NewView(fmt.Sprintf("%s %s", m.spinner.View(), m.message))
 }
 
 func mapSpinnerStyle(s tui.SpinnerStyle) spinner.Spinner {

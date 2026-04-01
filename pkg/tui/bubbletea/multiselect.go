@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -50,7 +50,7 @@ func (m multiSelectModel) Init() tea.Cmd { return nil }
 
 func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "up", "k":
 			if m.cursor > 0 {
@@ -64,7 +64,7 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.loop {
 				m.cursor = 0
 			}
-		case " ":
+		case " ", "space":
 			if m.selected[m.cursor] {
 				delete(m.selected, m.cursor)
 			} else {
@@ -90,7 +90,7 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m multiSelectModel) View() string {
+func (m multiSelectModel) View() tea.View {
 	if m.done {
 		var names []string
 		for i, c := range m.choices {
@@ -98,29 +98,34 @@ func (m multiSelectModel) View() string {
 				names = append(names, c)
 			}
 		}
-		return fmt.Sprintf("? %s %s\n", m.prompt, strings.Join(names, ", "))
+		return tea.NewView(fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(strings.Join(names, ", "))))
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "? %s (space to toggle, enter to confirm)\n", m.prompt)
+	fmt.Fprintf(&b, "%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), hintStyle.Render("(space to toggle, enter to confirm)"))
 
 	start, end := m.visibleRange()
 	for i := start; i < end; i++ {
-		cursor := "  "
+		cur := "  "
 		if i == m.cursor {
-			cursor = "> "
+			cur = cursorStyle.Render("> ")
 		}
-		check := "[ ]"
+		check := uncheckStyle.Render("[ ]")
+		label := dimStyle.Render(m.choices[i])
 		if m.selected[i] {
-			check = "[x]"
+			check = checkStyle.Render("[x]")
+			label = selectedStyle.Render(m.choices[i])
 		}
-		fmt.Fprintf(&b, "  %s%s %s\n", cursor, check, m.choices[i])
+		if i == m.cursor && !m.selected[i] {
+			label = selectedStyle.Render(m.choices[i])
+		}
+		fmt.Fprintf(&b, "  %s%s %s\n", cur, check, label)
 	}
 
 	if m.err != "" {
-		fmt.Fprintf(&b, "  ✗ %s\n", m.err)
+		fmt.Fprintf(&b, "  %s\n", errorStyle.Render("✗ "+m.err))
 	}
-	return b.String()
+	return tea.NewView(b.String())
 }
 
 func (m multiSelectModel) visibleRange() (int, int) {

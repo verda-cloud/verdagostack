@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/table"
+	"charm.land/lipgloss/v2"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -40,11 +40,7 @@ func (p *Prompter) Table(_ context.Context, columns []string, rows [][]string, o
 	)
 
 	s := table.DefaultStyles()
-	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		BorderBottom(true).
-		Bold(true)
+	s.Header = s.Header.Bold(true)
 	s.Selected = lipgloss.NewStyle()
 	t.SetStyles(s)
 

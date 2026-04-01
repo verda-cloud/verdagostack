@@ -4,16 +4,19 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
 
 type selectModel struct {
 	prompt   string
-	choices  []string
-	cursor   int
+	choices  []string // original full list — never mutated
+	filter   string   // current filter text
+	matched  []int    // indices into choices that match filter
+	cursor   int      // position within matched (not choices)
 	pageSize int
 	loop     bool
 	chosen   bool
@@ -29,12 +32,58 @@ func newSelectModel(prompt string, choices []string, cfg tui.SelectConfig) selec
 	if cursor < 0 || cursor >= len(choices) {
 		cursor = 0
 	}
+	matched := make([]int, len(choices))
+	for i := range choices {
+		matched[i] = i
+	}
 	return selectModel{
 		prompt:   prompt,
 		choices:  choices,
+		filter:   "",
+		matched:  matched,
 		cursor:   cursor,
 		pageSize: ps,
 		loop:     cfg.Loop,
+	}
+}
+
+func (m *selectModel) refilter() {
+	if m.filter == "" {
+		m.matched = make([]int, len(m.choices))
+		for i := range m.choices {
+			m.matched[i] = i
+		}
+	} else {
+		lower := strings.ToLower(m.filter)
+		m.matched = m.matched[:0]
+		for i, c := range m.choices {
+			if strings.Contains(strings.ToLower(c), lower) {
+				m.matched = append(m.matched, i)
+			}
+		}
+	}
+	m.cursor = 0
+}
+
+func (m *selectModel) moveUp() {
+	if len(m.matched) == 0 {
+		return
+	}
+	if m.cursor > 0 {
+		m.cursor--
+	} else if m.loop {
+		m.cursor = len(m.matched) - 1
+	}
+}
+
+func (m *selectModel) moveDown() {
+	if len(m.matched) == 0 {
+		return
+	}
+	if m.cursor < len(m.matched)-1 {
+		m.cursor++
+	} else if m.loop {
+		m.cursor = 0
 	}
 }
 
@@ -42,52 +91,92 @@ func (m selectModel) Init() tea.Cmd { return nil }
 
 func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			} else if m.loop {
-				m.cursor = len(m.choices) - 1
+	case tea.KeyPressMsg:
+		switch msg.Code {
+		case tea.KeyUp:
+			m.moveUp()
+		case tea.KeyDown:
+			m.moveDown()
+		case tea.KeyEnter:
+			if len(m.matched) == 0 {
+				return m, nil
 			}
-		case "down", "j":
-			if m.cursor < len(m.choices)-1 {
-				m.cursor++
-			} else if m.loop {
-				m.cursor = 0
-			}
-		case keyEnter:
 			m.chosen = true
 			return m, tea.Quit
-		case keyCtrlC, keyEsc:
-			m.aborted = true
-			return m, tea.Quit
+		case tea.KeyEscape:
+			if m.filter != "" {
+				m.filter = ""
+				m.refilter()
+			} else {
+				m.aborted = true
+				return m, tea.Quit
+			}
+		case tea.KeyBackspace:
+			if len(m.filter) > 0 {
+				_, size := utf8.DecodeLastRuneInString(m.filter)
+				m.filter = m.filter[:len(m.filter)-size]
+				m.refilter()
+			}
+		default:
+			if msg.Mod&tea.ModCtrl != 0 && msg.Code == 'c' {
+				m.aborted = true
+				return m, tea.Quit
+			}
+			if msg.Text != "" {
+				s := msg.Text
+				if m.filter == "" {
+					switch s {
+					case "k":
+						m.moveUp()
+						return m, nil
+					case "j":
+						m.moveDown()
+						return m, nil
+					}
+				}
+				m.filter += s
+				m.refilter()
+			}
 		}
 	}
 	return m, nil
 }
 
-func (m selectModel) View() string {
+func (m selectModel) View() tea.View {
 	if m.chosen {
-		return fmt.Sprintf("? %s %s\n", m.prompt, m.choices[m.cursor])
+		selected := m.choices[m.matched[m.cursor]]
+		return tea.NewView(fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(selected)))
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "? %s\n", m.prompt)
+	fmt.Fprintf(&b, "%s %s", promptStyle.Render("?"), titleStyle.Render(m.prompt))
+	if m.filter != "" {
+		fmt.Fprintf(&b, " %s", answerStyle.Render(m.filter))
+	}
+	b.WriteString("\n")
+
+	if len(m.matched) == 0 {
+		fmt.Fprintf(&b, "    %s\n", dimStyle.Render("no matches"))
+		return tea.NewView(b.String())
+	}
 
 	start, end := m.visibleRange()
 	for i := start; i < end; i++ {
+		label := m.choices[m.matched[i]]
 		if i == m.cursor {
-			fmt.Fprintf(&b, "  > %s\n", m.choices[i])
+			fmt.Fprintf(&b, "  %s %s\n", cursorStyle.Render(">"), selectedStyle.Render(label))
 		} else {
-			fmt.Fprintf(&b, "    %s\n", m.choices[i])
+			fmt.Fprintf(&b, "    %s\n", dimStyle.Render(label))
 		}
 	}
-	return b.String()
+	return tea.NewView(b.String())
 }
 
 func (m selectModel) visibleRange() (int, int) {
-	total := len(m.choices)
+	total := len(m.matched)
+	if total == 0 {
+		return 0, 0
+	}
 	if m.pageSize >= total {
 		return 0, total
 	}
@@ -128,5 +217,5 @@ func (p *Prompter) Select(ctx context.Context, prompt string, choices []string, 
 	if m.aborted {
 		return -1, context.Canceled
 	}
-	return m.cursor, nil
+	return m.matched[m.cursor], nil
 }
