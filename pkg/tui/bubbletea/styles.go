@@ -55,6 +55,30 @@ var (
 		Error:   lipgloss.Color("#f7768e"), // red
 		Dim:     lipgloss.Color("#565f89"), // comment
 	}
+
+	// ThemeGitHubLight is a light theme based on the GitHub Light palette.
+	ThemeGitHubLight = Theme{
+		Accent:  lipgloss.Color("#0969da"), // blue
+		Success: lipgloss.Color("#1a7f37"), // green
+		Error:   lipgloss.Color("#cf222e"), // red
+		Dim:     lipgloss.Color("#656d76"), // gray
+	}
+
+	// ThemeCatppuccinLatte is the light variant of the Catppuccin palette.
+	ThemeCatppuccinLatte = Theme{
+		Accent:  lipgloss.Color("#1e66f5"), // blue
+		Success: lipgloss.Color("#40a02b"), // green
+		Error:   lipgloss.Color("#d20f39"), // red
+		Dim:     lipgloss.Color("#9ca0b0"), // overlay0
+	}
+
+	// ThemeSolarizedLight uses the Solarized Light palette.
+	ThemeSolarizedLight = Theme{
+		Accent:  lipgloss.Color("#268bd2"), // blue
+		Success: lipgloss.Color("#859900"), // green
+		Error:   lipgloss.Color("#dc322f"), // red
+		Dim:     lipgloss.Color("#93a1a1"), // base1
+	}
 )
 
 // activeTheme is the current theme. Defaults to ThemeDefault.
@@ -66,11 +90,14 @@ var activeThemeName = "default"
 // Themes maps theme names to Theme values.
 // Use this for CLI flag validation or listing available themes.
 var Themes = map[string]Theme{
-	"default":    ThemeDefault,
-	"dracula":    ThemeDracula,
-	"catppuccin": ThemeCatppuccin,
-	"nord":       ThemeNord,
-	"tokyonight": ThemeTokyoNight,
+	"default":          ThemeDefault,
+	"dracula":          ThemeDracula,
+	"catppuccin":       ThemeCatppuccin,
+	"nord":             ThemeNord,
+	"tokyonight":       ThemeTokyoNight,
+	"github-light":     ThemeGitHubLight,
+	"catppuccin-latte": ThemeCatppuccinLatte,
+	"solarized-light":  ThemeSolarizedLight,
 }
 
 // SetTheme changes the color theme for all TUI prompts.
@@ -113,7 +140,7 @@ func GetThemeName() string {
 
 // ThemeNames returns the names of all built-in themes.
 func ThemeNames() []string {
-	return []string{"default", "dracula", "catppuccin", "nord", "tokyonight"}
+	return []string{"default", "dracula", "catppuccin", "catppuccin-latte", "nord", "tokyonight", "github-light", "solarized-light"}
 }
 
 // Shared styles derived from the active theme.
