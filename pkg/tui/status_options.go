@@ -141,3 +141,33 @@ func ResolveTableConfig(opts []TableOption) TableConfig {
 	}
 	return cfg
 }
+
+// --- Pager Options ---
+
+// PagerOption configures a Pager.
+type PagerOption func(*PagerConfig)
+
+// PagerConfig holds resolved Pager settings.
+type PagerConfig struct {
+	Title       string // optional title shown in the header
+	LineNumbers bool   // show line numbers
+}
+
+// WithPagerTitle sets a title displayed in the pager header.
+func WithPagerTitle(t string) PagerOption {
+	return func(c *PagerConfig) { c.Title = t }
+}
+
+// WithLineNumbers enables line numbers in the pager.
+func WithLineNumbers() PagerOption {
+	return func(c *PagerConfig) { c.LineNumbers = true }
+}
+
+// ResolvePagerConfig applies options to a default PagerConfig.
+func ResolvePagerConfig(opts []PagerOption) PagerConfig {
+	cfg := PagerConfig{}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg
+}

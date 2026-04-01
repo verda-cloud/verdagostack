@@ -18,6 +18,11 @@ type Status interface {
 
 	// Table renders a static table to the output and returns.
 	Table(ctx context.Context, columns []string, rows [][]string, opts ...TableOption) error
+
+	// Pager displays content in a scrollable viewport if it overflows the
+	// terminal height, or prints it directly if it fits. The user navigates
+	// with arrow keys/j/k/pgup/pgdn and exits with q/esc.
+	Pager(ctx context.Context, content string, opts ...PagerOption) error
 }
 
 // SpinnerHandle controls a running spinner.
