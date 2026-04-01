@@ -303,3 +303,58 @@ func TestSelectModel_NavigationWrapsInFilteredList(t *testing.T) {
 		t.Errorf("cursor = %d after wrap, want 0", m.cursor)
 	}
 }
+
+func TestSelectModel_BackspaceOnEmptyFilterIsNoop(t *testing.T) {
+	choices := []string{"Apple", "Banana"}
+	m := newSelectModel("Pick", choices, tui.SelectConfig{PageSize: 10, Loop: true})
+
+	m = sendKey(m, tea.KeyMsg{Type: tea.KeyBackspace})
+
+	if m.filter != "" {
+		t.Errorf("filter should still be empty, got %q", m.filter)
+	}
+	if len(m.matched) != 2 {
+		t.Errorf("matched should still have all choices, got %d", len(m.matched))
+	}
+}
+
+func TestSelectModel_ArrowKeysOnEmptyMatches(t *testing.T) {
+	choices := []string{"Apple", "Banana"}
+	m := newSelectModel("Pick", choices, tui.SelectConfig{PageSize: 10, Loop: true})
+
+	for _, r := range "zzz" {
+		m = sendRune(m, r)
+	}
+	if len(m.matched) != 0 {
+		t.Fatalf("expected 0 matches, got %d", len(m.matched))
+	}
+
+	// Arrow keys should be no-ops, not panic
+	m = sendKey(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = sendKey(m, tea.KeyMsg{Type: tea.KeyUp})
+
+	if m.cursor != 0 {
+		t.Errorf("cursor should remain 0, got %d", m.cursor)
+	}
+}
+
+func TestSelectModel_ViewChosenWithFilter(t *testing.T) {
+	choices := []string{"Apple", "Apricot", "Banana", "Blueberry"}
+	m := newSelectModel("Pick", choices, tui.SelectConfig{PageSize: 10, Loop: true})
+
+	m = sendRune(m, 'b')
+	m = sendRune(m, 'l')
+	m = sendKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if !m.chosen {
+		t.Fatal("expected chosen=true")
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "Blueberry") {
+		t.Errorf("chosen view should show Blueberry, got:\n%s", view)
+	}
+	if strings.Contains(view, "bl") && !strings.Contains(view, "Blueberry") {
+		t.Error("chosen view should show selected value, not filter text")
+	}
+}
