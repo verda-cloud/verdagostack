@@ -263,12 +263,13 @@ func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) 
 	}
 	e.transition(e.current, stateCompleted, value)
 
-	// Broadcast collected change to all regions.
+	// Broadcast collected change to all regions and re-render.
 	e.bus.Broadcast(CollectedChangedMsg{
 		Key:       step.Name,
 		Value:     value,
 		Collected: e.store.Collected(),
 	})
+	e.renderRegions()
 
 	e.invalidateDownstream(e.current)
 	e.current++
@@ -295,6 +296,7 @@ func (e *Engine) transition(idx int, newState stepState, value any) {
 	rt.value = value
 	rt.choices = nil // invalidate cached choices
 	rt.loaded = false
+	rt.rewindCount = 0 // reset guard so revisits get fresh attempts
 
 	// Keep store in sync.
 	if value != nil {
