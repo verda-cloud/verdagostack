@@ -126,7 +126,8 @@ func main() {
 				Prompt:      wizard.SelectPrompt,
 				Required:    true,
 				DependsOn:   []string{"environment"},
-				Loader: func(_ context.Context, _ tui.Prompter, c map[string]any) ([]wizard.Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
+					c := store.Collected()
 					// Simulates an API call filtered by environment.
 					return regionsByEnv[c["environment"].(string)], nil
 				},
@@ -138,7 +139,8 @@ func main() {
 				Prompt:      wizard.SelectPrompt,
 				Required:    true,
 				DependsOn:   []string{"region"},
-				Loader: func(_ context.Context, _ tui.Prompter, c map[string]any) ([]wizard.Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
+					c := store.Collected()
 					// Simulates API: available sizes depend on region.
 					return sizesByRegion[c["region"].(string)], nil
 				},
@@ -208,7 +210,7 @@ func main() {
 	fmt.Println("Navigate: ↑/↓ to move, Enter to select, Esc to go back")
 	fmt.Println()
 
-	engine := wizard.NewEngine(p)
+	engine := wizard.NewEngine(p, nil)
 	if err := engine.Run(ctx, flow); err != nil {
 		log.Fatalf("Wizard failed: %v", err)
 	}

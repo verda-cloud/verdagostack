@@ -35,8 +35,9 @@ func TestEngine_HappyPath_AllStepsPrompted(t *testing.T) {
 				Prompt:      SelectPrompt,
 				Required:    true,
 				DependsOn:   []string{"region"},
-				Loader: func(_ context.Context, _ tui.Prompter, collected map[string]any) ([]Choice, error) {
-					if collected["region"] == "FIN-01" {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
+					c := store.Collected()
+					if c["region"] == "FIN-01" {
 						return []Choice{{Label: "H100", Value: "h100"}}, nil
 					}
 					return []Choice{{Label: "A100", Value: "a100"}}, nil
@@ -47,7 +48,7 @@ func TestEngine_HappyPath_AllStepsPrompted(t *testing.T) {
 	}
 
 	p := tuitesting.New().AddSelect(0).AddSelect(0)
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -79,7 +80,7 @@ func TestEngine_SkipAlreadySet(t *testing.T) {
 	}
 
 	p := tuitesting.New()
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -115,7 +116,7 @@ func TestEngine_ShouldSkip(t *testing.T) {
 	}
 
 	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -143,7 +144,7 @@ func TestEngine_TextInput(t *testing.T) {
 	}
 
 	p := tuitesting.New().AddTextInput("custom-host")
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -175,7 +176,7 @@ func TestEngine_MultiSelect(t *testing.T) {
 	}
 
 	p := tuitesting.New().AddMultiSelect([]int{0, 2})
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -202,7 +203,7 @@ func TestEngine_Confirm(t *testing.T) {
 	}
 
 	p := tuitesting.New().AddConfirm(true)
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -229,7 +230,7 @@ func TestEngine_Password(t *testing.T) {
 	}
 
 	p := tuitesting.New().AddPassword("secret-123")
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -257,7 +258,7 @@ func TestEngine_DefaultUsedForOptional(t *testing.T) {
 	}
 
 	p := tuitesting.New().AddTextInput("")
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -289,8 +290,9 @@ func TestEngine_BackNavigation_EmptyRequired(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"region"},
-				Loader: func(_ context.Context, _ tui.Prompter, collected map[string]any) ([]Choice, error) {
-					if collected["region"] == "FIN-01" {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
+					c := store.Collected()
+					if c["region"] == "FIN-01" {
 						return []Choice{}, nil // empty — triggers auto-back
 					}
 					return []Choice{{Label: "A100", Value: "a100"}}, nil
@@ -303,7 +305,7 @@ func TestEngine_BackNavigation_EmptyRequired(t *testing.T) {
 	// First: select FIN-01 (idx 0) → gpu empty → auto-back
 	// Second: select SWE-01 (idx 1) → gpu has A100 → select idx 0
 	p := tuitesting.New().AddSelect(0).AddSelect(1).AddSelect(0)
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -325,7 +327,7 @@ func TestEngine_EmptyRequired_AtFirstStep_ReturnsError(t *testing.T) {
 				Name:     "gpu",
 				Prompt:   SelectPrompt,
 				Required: true,
-				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					return []Choice{}, nil
 				},
 				Setter: func(v any) {},
@@ -334,7 +336,7 @@ func TestEngine_EmptyRequired_AtFirstStep_ReturnsError(t *testing.T) {
 	}
 
 	p := tuitesting.New()
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
@@ -365,7 +367,7 @@ func TestEngine_ValidationError_RepromptsUntilValid(t *testing.T) {
 
 	// First: "bad" (fails validation, re-prompt), second: "100" (passes)
 	p := tuitesting.New().AddTextInput("bad").AddTextInput("100")
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -386,7 +388,7 @@ func TestEngine_CachesLoaderResults(t *testing.T) {
 				Name:     "static",
 				Prompt:   SelectPrompt,
 				Required: true,
-				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					loadCount++
 					return []Choice{{Label: "A", Value: "a"}}, nil
 				},
@@ -396,7 +398,7 @@ func TestEngine_CachesLoaderResults(t *testing.T) {
 	}
 
 	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -451,7 +453,8 @@ func TestEngine_FullFlow_VMCreate(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"compute-category"},
-				Loader: func(_ context.Context, _ tui.Prompter, c map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
+					c := store.Collected()
 					if c["compute-category"] == "GPU" {
 						return []Choice{
 							{Label: "H100 80GB", Value: "1H100"},
@@ -467,7 +470,7 @@ func TestEngine_FullFlow_VMCreate(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"instance-type"},
-				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					return []Choice{{Label: "Finland (FIN-01)", Value: "FIN-01"}}, nil
 				},
 				Setter: func(v any) { location = v.(string) },
@@ -477,7 +480,7 @@ func TestEngine_FullFlow_VMCreate(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"instance-type"},
-				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					return []Choice{{Label: "Ubuntu 24.04", Value: "ubuntu-24.04"}}, nil
 				},
 				Setter: func(v any) { image = v.(string) },
@@ -512,7 +515,7 @@ func TestEngine_FullFlow_VMCreate(t *testing.T) {
 		AddMultiSelect([]int{0, 1}). // both SSH keys
 		AddTextInput("my-vm")        // hostname
 
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -584,7 +587,7 @@ func TestEngine_UserInitiatedBack(t *testing.T) {
 		AddSelect(1). // region: Sweden
 		AddSelect(1)  // gpu: A100
 
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -620,7 +623,7 @@ func TestEngine_BackNotShownOnFirstStep(t *testing.T) {
 	}
 
 	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -648,7 +651,7 @@ func TestEngine_RequiredTextInput_RepromptsOnEmpty(t *testing.T) {
 
 	// First: empty (re-prompt), second: valid
 	p := tuitesting.New().AddTextInput("").AddTextInput("my-service")
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -688,7 +691,8 @@ func TestEngine_DependencyAwareAutoBack(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"region"},
-				Loader: func(_ context.Context, _ tui.Prompter, c map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
+					c := store.Collected()
 					if c["region"] == "a" {
 						return []Choice{}, nil // empty for region A
 					}
@@ -712,7 +716,7 @@ func TestEngine_DependencyAwareAutoBack(t *testing.T) {
 		AddTextInput("test2"). // name again
 		AddSelect(0)           // gpu: H100
 
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -743,7 +747,7 @@ func TestEngine_NilSetter_NosPanic(t *testing.T) {
 	}
 
 	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -791,7 +795,7 @@ func TestEngine_ResetterCalledOnBack(t *testing.T) {
 		AddSelect(0). // category: on-demand
 		AddSelect(0)  // contract: monthly
 
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -807,7 +811,7 @@ func TestEngine_ResetterCalledOnBack(t *testing.T) {
 		AddSelect(1). // contract: ← Back
 		AddSelect(1)  // category: spot (contract will be skipped)
 
-	engine2 := NewEngine(p2)
+	engine2 := NewEngine(p2, nil)
 	err = engine2.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -868,7 +872,7 @@ func TestEngine_SkipClearsStaleValue(t *testing.T) {
 		AddSelect(1). // category: spot (contract skipped, resetter called)
 		AddSelect(0)  // done: OK
 
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -897,7 +901,7 @@ func TestEngine_FixedDependency_ReturnsError(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"region"},
-				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					return []Choice{}, nil // always empty
 				},
 				Setter: func(v any) {},
@@ -906,7 +910,7 @@ func TestEngine_FixedDependency_ReturnsError(t *testing.T) {
 	}
 
 	p := tuitesting.New()
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
@@ -925,7 +929,7 @@ func TestEngine_OptionalEmptyChoices_SkipsWithDefault(t *testing.T) {
 				Prompt:   SelectPrompt,
 				Required: false,
 				Default:  func(_ map[string]any) any { return "none" },
-				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					return []Choice{}, nil // empty
 				},
 				Setter: func(v any) { addon = v.(string) },
@@ -934,7 +938,7 @@ func TestEngine_OptionalEmptyChoices_SkipsWithDefault(t *testing.T) {
 	}
 
 	p := tuitesting.New() // no prompts queued — step should be auto-skipped
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -966,7 +970,8 @@ func TestEngine_IsSetPropagatesValueToCollected(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"region"},
-				Loader: func(_ context.Context, _ tui.Prompter, c map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
+					c := store.Collected()
 					// This should see region in collected.
 					if c["region"] != "FIN-01" {
 						t.Errorf("expected region 'FIN-01' in collected, got %v", c["region"])
@@ -979,7 +984,7 @@ func TestEngine_IsSetPropagatesValueToCollected(t *testing.T) {
 	}
 
 	p := tuitesting.New().AddSelect(0) // gpu: H100
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -1023,7 +1028,8 @@ func TestEngine_MixedFixedEditableDependencies(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"region", "category"},
-				Loader: func(_ context.Context, _ tui.Prompter, c map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
+					c := store.Collected()
 					if c["category"] == "GPU" {
 						return []Choice{}, nil // empty for GPU
 					}
@@ -1041,7 +1047,7 @@ func TestEngine_MixedFixedEditableDependencies(t *testing.T) {
 		AddSelect(1). // category: CPU (after auto-back)
 		AddSelect(0)  // gpu: 32cpu
 
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1065,7 +1071,7 @@ func TestEngine_OptionalEmptyNoDefault_Resets(t *testing.T) {
 				Prompt:   SelectPrompt,
 				Required: false,
 				// No Default — should reset stale value
-				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					return []Choice{}, nil
 				},
 				Setter:   func(v any) { addon = v.(string) },
@@ -1075,7 +1081,7 @@ func TestEngine_OptionalEmptyNoDefault_Resets(t *testing.T) {
 	}
 
 	p := tuitesting.New()
-	engine := NewEngine(p)
+	engine := NewEngine(p, nil)
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -1119,7 +1125,8 @@ func TestEngine_SkippedDepNotPickedByAutoBack(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"b"},
-				Loader: func(_ context.Context, _ tui.Prompter, col map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
+					col := store.Collected()
 					if col["b"] == nil {
 						return []Choice{}, nil // empty when B is skipped
 					}
@@ -1138,7 +1145,7 @@ func TestEngine_SkippedDepNotPickedByAutoBack(t *testing.T) {
 		AddSelect(0). // B: B1
 		AddSelect(0)  // C: C1
 
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1190,7 +1197,7 @@ func TestEngine_EscOnTextInputGoesBack(t *testing.T) {
 	p := tuitesting.New().AddSelect(0) // region: A
 	// Don't queue text input — it will error with "no text input responses queued"
 
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 	err := engine.Run(cancelCtx, flow)
 
 	// The test prompter returns a non-context.Canceled error, so this will be a fatal error.
@@ -1237,7 +1244,7 @@ func TestEngine_CancelledContextOnFirstStepAborts(t *testing.T) {
 	// with "no select responses queued" — that's a non-context error, which is fatal.
 	// This verifies the engine propagates fatal errors correctly.
 	p := tuitesting.New().AddSelect(0) // only first step
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
@@ -1275,7 +1282,7 @@ func TestEngine_ShouldSkipOverridesIsSet(t *testing.T) {
 
 	// env=dev → tls should be skipped and reset, even though IsSet=true
 	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -1319,7 +1326,7 @@ func TestEngine_BackNotShownWhenAllPriorFixed(t *testing.T) {
 
 	// Only 1 choice ("A") since "← Back" should NOT be shown (no editable prior step).
 	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -1368,7 +1375,8 @@ func TestEngine_SkippedDepChainRewindsToController(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"tls"},
-				Loader: func(_ context.Context, _ tui.Prompter, c map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
+					c := store.Collected()
 					if _, hasTLS := c["tls"]; !hasTLS {
 						return []Choice{}, nil // no certs when TLS is skipped
 					}
@@ -1391,7 +1399,7 @@ func TestEngine_SkippedDepChainRewindsToController(t *testing.T) {
 		AddConfirm(true).       // tls: yes (not skipped for prod)
 		AddSelect(0)            // cert: wildcard
 
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1425,7 +1433,7 @@ func TestEngine_PresetValueValidated(t *testing.T) {
 	}
 
 	p := tuitesting.New()
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
@@ -1451,7 +1459,7 @@ func TestEngine_RunClearsStateFromPreviousRun(t *testing.T) {
 
 	// First run: select A
 	p1 := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p1, WithOutput(io.Discard))
+	engine := NewEngine(p1, nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("run 1: %v", err)
@@ -1500,7 +1508,7 @@ func TestEngine_SkippedDepsNoRewindTarget_ReturnsError(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"skipped"},
-				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					return []Choice{}, nil
 				},
 				Setter: func(v any) {},
@@ -1509,7 +1517,7 @@ func TestEngine_SkippedDepsNoRewindTarget_ReturnsError(t *testing.T) {
 	}
 
 	p := tuitesting.New()
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
@@ -1539,7 +1547,7 @@ func TestEngine_BackSkipsAutoSkippedOptional(t *testing.T) {
 				Name:     "b",
 				Prompt:   SelectPrompt,
 				Required: false,
-				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					return []Choice{}, nil // always empty → auto-skipped
 				},
 				Setter: func(v any) {},
@@ -1565,7 +1573,7 @@ func TestEngine_BackSkipsAutoSkippedOptional(t *testing.T) {
 		AddSelect(1). // A: A2
 		AddSelect(0)  // C: C1
 
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1600,7 +1608,7 @@ func TestEngine_ConfirmDefaultHonored(t *testing.T) {
 
 	// Queue true — matches the default.
 	p := tuitesting.New().AddConfirm(true)
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -1622,7 +1630,7 @@ func TestEngine_AutoSkippedDepNotRewindTarget(t *testing.T) {
 				Name:     "addon",
 				Prompt:   SelectPrompt,
 				Required: false,
-				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					return []Choice{}, nil
 				},
 				Setter: func(v any) {},
@@ -1632,7 +1640,7 @@ func TestEngine_AutoSkippedDepNotRewindTarget(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"addon"},
-				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					return []Choice{}, nil
 				},
 				Setter: func(v any) {},
@@ -1641,7 +1649,7 @@ func TestEngine_AutoSkippedDepNotRewindTarget(t *testing.T) {
 	}
 
 	p := tuitesting.New()
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
@@ -1668,7 +1676,7 @@ func TestEngine_NameFallbackWhenDescriptionEmpty(t *testing.T) {
 	}
 
 	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -1705,7 +1713,7 @@ func TestEngine_SelectDefaultForwarded(t *testing.T) {
 
 	// Select index 1 (medium — matches default).
 	p := tuitesting.New().AddSelect(1)
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -1756,7 +1764,7 @@ func TestEngine_GoBackClearsDownstreamCollected(t *testing.T) {
 		AddTextInput("world"). // B: world
 		AddSelect(0)           // C: C1
 
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1803,7 +1811,7 @@ func TestEngine_SkippedDepWithFixedController_ErrorsNotLoops(t *testing.T) {
 				Prompt:    SelectPrompt,
 				Required:  true,
 				DependsOn: []string{"tls"},
-				Loader: func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					return []Choice{}, nil
 				},
 				Setter: func(v any) {},
@@ -1817,7 +1825,7 @@ func TestEngine_SkippedDepWithFixedController_ErrorsNotLoops(t *testing.T) {
 		AddTextInput("svc2").
 		AddTextInput("svc3").
 		AddTextInput("svc4")
-	engine := NewEngine(p, WithOutput(io.Discard))
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
 
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
@@ -1859,7 +1867,7 @@ func TestEngine_ProgressBarCountsOnlyVisibleSteps(t *testing.T) {
 
 	p := tuitesting.New().AddTextInput("val-a").AddTextInput("val-d")
 	var buf bytes.Buffer
-	engine := NewEngine(p, WithOutput(&buf))
+	engine := NewEngine(p, nil, WithOutput(&buf))
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -1906,7 +1914,7 @@ func TestEngine_ProgressBarWithBackNavigation(t *testing.T) {
 		AddSelect(1). // step a again: select Y
 		AddSelect(0)  // step b: select M
 	var buf bytes.Buffer
-	engine := NewEngine(p, WithOutput(&buf))
+	engine := NewEngine(p, nil, WithOutput(&buf))
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -1938,7 +1946,7 @@ func TestEngine_SingleStepNoProgressBar(t *testing.T) {
 
 	p := tuitesting.New().AddTextInput("hello")
 	var buf bytes.Buffer
-	engine := NewEngine(p, WithOutput(&buf))
+	engine := NewEngine(p, nil, WithOutput(&buf))
 
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
@@ -1948,5 +1956,109 @@ func TestEngine_SingleStepNoProgressBar(t *testing.T) {
 	output := buf.String()
 	if strings.Contains(output, "Step") {
 		t.Errorf("single-step flow should have no progress bar, got:\n%s", output)
+	}
+}
+
+func TestEngine_RegionLayout(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Layout: []RegionDef{
+			{ID: "progress", Region: NewProgressRegion()},
+		},
+		Steps: []Step{
+			{
+				Name:   "a",
+				Prompt: TextInputPrompt,
+				Setter: func(v any) {},
+			},
+			{
+				Name:   "b",
+				Prompt: TextInputPrompt,
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	p := tuitesting.New().AddTextInput("val-a").AddTextInput("val-b")
+	var buf bytes.Buffer
+	engine := NewEngine(p, nil, WithOutput(&buf))
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Step 1 of 2") {
+		t.Errorf("expected progress region output, got:\n%s", output)
+	}
+}
+
+func TestEngine_LoaderReceivesStatusAndStore(t *testing.T) {
+	var gotStore bool
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "a",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
+					gotStore = store != nil
+					store.Set("loaded", true)
+					return []Choice{{Label: "X", Value: "x"}}, nil
+				},
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	p := tuitesting.New().AddSelect(0)
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !gotStore {
+		t.Error("loader should receive non-nil store")
+	}
+
+	v, ok := engine.Store().Get("loaded")
+	if !ok || v != true {
+		t.Error("loader should be able to write to store")
+	}
+}
+
+func TestEngine_DefaultLayoutWhenNil(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:   "a",
+				Prompt: TextInputPrompt,
+				Setter: func(v any) {},
+			},
+			{
+				Name:   "b",
+				Prompt: TextInputPrompt,
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	p := tuitesting.New().AddTextInput("1").AddTextInput("2")
+	var buf bytes.Buffer
+	engine := NewEngine(p, nil, WithOutput(&buf))
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Step 1 of 2") {
+		t.Errorf("default layout should include progress region, got:\n%s", output)
 	}
 }

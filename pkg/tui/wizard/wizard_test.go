@@ -67,7 +67,7 @@ func TestStaticChoices(t *testing.T) {
 		Choice{Label: "A", Value: "a"},
 		Choice{Label: "B", Value: "b"},
 	)
-	choices, err := loader(context.Background(), nil, nil)
+	choices, err := loader(context.Background(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

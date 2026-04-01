@@ -25,10 +25,10 @@ type Choice struct {
 }
 
 // LoaderFunc fetches available choices for a step.
-// It receives the Prompter so it can run sub-prompts internally
-// (e.g., SSH key creation when no keys exist).
-// The collected map contains values from all previously completed steps.
-type LoaderFunc func(ctx context.Context, prompter tui.Prompter, collected map[string]any) ([]Choice, error)
+// It receives the Prompter for sub-prompts, Status for spinners/progress,
+// and Store for reading/writing shared data.
+// Use store.Collected() to access values from previously completed steps.
+type LoaderFunc func(ctx context.Context, prompter tui.Prompter, status tui.Status, store *Store) ([]Choice, error)
 
 // Step defines one step in the wizard flow.
 type Step struct {
@@ -49,14 +49,15 @@ type Step struct {
 
 // Flow defines a complete wizard execution graph.
 type Flow struct {
-	Name  string
-	Steps []Step
+	Name   string
+	Steps  []Step
+	Layout []RegionDef // optional; nil = default layout (progress bar)
 }
 
 // StaticChoices returns a LoaderFunc that always returns the given choices.
 // Use for steps with fixed options that don't require an API call.
 func StaticChoices(choices ...Choice) LoaderFunc {
-	return func(_ context.Context, _ tui.Prompter, _ map[string]any) ([]Choice, error) {
+	return func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 		return choices, nil
 	}
 }

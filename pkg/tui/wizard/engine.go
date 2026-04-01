@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -40,6 +37,9 @@ const maxRewindsPerStep = 3
 // Engine runs a wizard Flow interactively.
 type Engine struct {
 	prompter tui.Prompter
+	status   tui.Status
+	store    *Store
+	bus      *MessageBus
 	flow     *Flow         // the flow being executed (set during Run)
 	steps    []stepRuntime // per-step runtime state, indexed same as flow.Steps
 	current  int
@@ -54,13 +54,22 @@ func WithOutput(w io.Writer) EngineOption {
 	return func(e *Engine) { e.writer = w }
 }
 
-// NewEngine creates a wizard engine with the given prompter.
-func NewEngine(prompter tui.Prompter, opts ...EngineOption) *Engine {
-	e := &Engine{prompter: prompter}
+// NewEngine creates a wizard engine with the given prompter and optional status.
+func NewEngine(prompter tui.Prompter, status tui.Status, opts ...EngineOption) *Engine {
+	e := &Engine{
+		prompter: prompter,
+		status:   status,
+		store:    NewStore(),
+	}
 	for _, opt := range opts {
 		opt(e)
 	}
 	return e
+}
+
+// Store returns the engine's shared store.
+func (e *Engine) Store() *Store {
+	return e.store
 }
 
 func (e *Engine) out() io.Writer {
@@ -71,28 +80,8 @@ func (e *Engine) out() io.Writer {
 }
 
 // Collected returns the values collected during the flow.
-// Only includes steps that completed or were pre-set via flags.
 func (e *Engine) Collected() map[string]any {
-	return e.buildCollected()
-}
-
-// buildCollected builds a map of step name → value for completed/fixed steps.
-func (e *Engine) buildCollected() map[string]any {
-	if e.flow == nil {
-		return make(map[string]any)
-	}
-	result := make(map[string]any)
-	for i, rt := range e.steps {
-		switch rt.state {
-		case stateCompleted, stateFixed:
-			result[e.flow.Steps[i].Name] = rt.value
-		case stateAutoSkipped:
-			if rt.value != nil {
-				result[e.flow.Steps[i].Name] = rt.value
-			}
-		}
-	}
-	return result
+	return e.store.Collected()
 }
 
 // Run executes the flow step by step.
@@ -101,9 +90,19 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	e.flow = flow
 	e.steps = make([]stepRuntime, len(flow.Steps))
 
+	// Initialize message bus with layout regions (or default).
+	e.bus = NewMessageBus()
+	layout := flow.Layout
+	if layout == nil {
+		layout = []RegionDef{{ID: "progress", Region: NewProgressRegion()}}
+	}
+	for _, def := range layout {
+		e.bus.Register(def.ID, def.Region)
+	}
+
 	for e.current < len(flow.Steps) {
 		step := flow.Steps[e.current]
-		col := e.buildCollected()
+		col := e.store.Collected()
 
 		// ShouldSkip takes priority over IsSet.
 		if step.ShouldSkip != nil && step.ShouldSkip(col) {
@@ -156,6 +155,7 @@ func (e *Engine) handleFixed(step Step) error {
 		}
 		e.steps[e.current].state = stateFixed
 		e.steps[e.current].value = val
+		e.store.SetCollected(step.Name, val)
 	} else {
 		e.steps[e.current].state = stateFixed
 	}
@@ -164,7 +164,7 @@ func (e *Engine) handleFixed(step Step) error {
 
 // handleEmptyChoices handles the case when a step's loader returns no choices.
 func (e *Engine) handleEmptyChoices(step Step) (bool, error) {
-	col := e.buildCollected()
+	col := e.store.Collected()
 	if !step.Required {
 		if step.Default != nil {
 			val := step.Default(col)
@@ -197,7 +197,14 @@ func (e *Engine) handleEmptyChoices(step Step) (bool, error) {
 
 // handlePrompt prompts the user and processes the result.
 func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) error {
-	e.renderProgress()
+	// Broadcast step change to all regions and render.
+	e.bus.Broadcast(StepChangedMsg{
+		Current:   e.currentVisibleStep(),
+		Total:     e.countVisibleSteps(),
+		StepName:  step.Name,
+		Collected: e.store.Collected(),
+	})
+	e.renderRegions()
 
 	canGoBack := e.hasEditablePriorStep()
 	value, err := e.prompt(ctx, step, choices, canGoBack)
@@ -220,7 +227,7 @@ func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) 
 		return fmt.Errorf("step %q: %w", step.Name, err)
 	}
 
-	col := e.buildCollected()
+	col := e.store.Collected()
 
 	// Apply default for non-required empty values.
 	if !step.Required && isEmpty(value) && step.Default != nil {
@@ -246,6 +253,14 @@ func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) 
 		step.Setter(value)
 	}
 	e.transition(e.current, stateCompleted, value)
+
+	// Broadcast collected change to all regions.
+	e.bus.Broadcast(CollectedChangedMsg{
+		Key:       step.Name,
+		Value:     value,
+		Collected: e.store.Collected(),
+	})
+
 	e.invalidateDownstream(e.current)
 	e.current++
 	return nil
@@ -271,6 +286,13 @@ func (e *Engine) transition(idx int, newState stepState, value any) {
 	rt.value = value
 	rt.choices = nil // invalidate cached choices
 	rt.loaded = false
+
+	// Keep store in sync.
+	if value != nil {
+		e.store.SetCollected(step.Name, value)
+	} else {
+		e.store.ClearCollected(step.Name)
+	}
 }
 
 // resetRange resets all non-fixed steps in [from, to) to statePending.
@@ -371,7 +393,7 @@ func (e *Engine) isEditable(idx int) bool {
 	if step.IsSet != nil && step.IsSet() {
 		return false
 	}
-	col := e.buildCollected()
+	col := e.store.Collected()
 	if step.ShouldSkip != nil && step.ShouldSkip(col) {
 		return false
 	}
@@ -404,8 +426,7 @@ func (e *Engine) loadChoices(ctx context.Context, step Step) ([]Choice, error) {
 		return rt.choices, nil
 	}
 
-	col := e.buildCollected()
-	choices, err := step.Loader(ctx, e.prompter, col)
+	choices, err := step.Loader(ctx, e.prompter, e.status, e.store)
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +480,7 @@ func (e *Engine) promptSelect(ctx context.Context, step Step, choices []Choice, 
 	}
 	var opts []tui.SelectOption
 	if step.Default != nil {
-		col := e.buildCollected() // safe: only needs completed values
+		col := e.store.Collected() // safe: only needs completed values
 		if defVal, ok := step.Default(col).(string); ok {
 			for i, c := range choices {
 				if c.Value == defVal {
@@ -489,7 +510,7 @@ func (e *Engine) promptMultiSelect(ctx context.Context, step Step, choices []Cho
 		opts = append(opts, tui.WithMinSelections(1))
 	}
 	if step.Default != nil {
-		col := e.buildCollected()
+		col := e.store.Collected()
 		if defVals, ok := step.Default(col).([]string); ok && len(defVals) > 0 {
 			valSet := make(map[string]bool, len(defVals))
 			for _, v := range defVals {
@@ -525,7 +546,7 @@ func (e *Engine) promptMultiSelect(ctx context.Context, step Step, choices []Cho
 func (e *Engine) promptTextInput(ctx context.Context, step Step) (any, error) {
 	var opts []tui.TextInputOption
 	if step.Default != nil {
-		col := e.buildCollected()
+		col := e.store.Collected()
 		if d, ok := step.Default(col).(string); ok && d != "" {
 			opts = append(opts, tui.WithDefault(d))
 		}
@@ -536,7 +557,7 @@ func (e *Engine) promptTextInput(ctx context.Context, step Step) (any, error) {
 func (e *Engine) promptConfirm(ctx context.Context, step Step) (any, error) {
 	var opts []tui.ConfirmOption
 	if step.Default != nil {
-		col := e.buildCollected()
+		col := e.store.Collected()
 		if d, ok := step.Default(col).(bool); ok {
 			opts = append(opts, tui.WithConfirmDefault(d))
 		}
@@ -549,7 +570,7 @@ func (e *Engine) promptConfirm(ctx context.Context, step Step) (any, error) {
 // countVisibleSteps returns the number of steps that will be prompted
 // (not fixed, not skipped, not auto-skipped).
 func (e *Engine) countVisibleSteps() int {
-	col := e.buildCollected()
+	col := e.store.Collected()
 	count := 0
 	for i, step := range e.flow.Steps {
 		if step.IsSet != nil && step.IsSet() {
@@ -569,7 +590,7 @@ func (e *Engine) countVisibleSteps() int {
 // currentVisibleStep returns the 1-based position of the current step
 // among visible steps.
 func (e *Engine) currentVisibleStep() int {
-	col := e.buildCollected()
+	col := e.store.Collected()
 	pos := 0
 	for i, step := range e.flow.Steps {
 		if step.IsSet != nil && step.IsSet() {
@@ -589,30 +610,13 @@ func (e *Engine) currentVisibleStep() int {
 	return pos
 }
 
-// renderProgress prints a progress bar above the next prompt.
-//
-//	━━━━━━━━━━━━━━━━░░░░░░░░░░░░  Step 4 of 12
-func (e *Engine) renderProgress() {
-	total := e.countVisibleSteps()
-	if total <= 1 {
-		return
+// renderRegions outputs all region renders to the writer.
+func (e *Engine) renderRegions() {
+	for _, output := range e.bus.RenderAll() {
+		if output != "" {
+			_, _ = fmt.Fprint(e.out(), output)
+		}
 	}
-	current := e.currentVisibleStep()
-
-	const barWidth = 30
-	filled := barWidth * current / total
-	unfilled := barWidth - filled
-
-	filledStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
-	unfilledStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-
-	bar := filledStyle.Render(strings.Repeat("━", filled)) +
-		unfilledStyle.Render(strings.Repeat("░", unfilled))
-
-	label := fmt.Sprintf("  Step %d of %d", current, total)
-	dimLabel := unfilledStyle.Render(label)
-
-	_, _ = fmt.Fprintf(e.out(), "\n%s%s\n", bar, dimLabel)
 }
 
 // --- Utilities ---
