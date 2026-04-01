@@ -28,17 +28,18 @@ func TestSelectModel_Refilter(t *testing.T) {
 	m := newSelectModel("Pick", choices, tui.SelectConfig{PageSize: 10, Loop: true})
 
 	// Filter by "ap" — should match Apple (0), Apricot (1) (case-insensitive)
-	m.filter = "ap"
-	m.refilter()
+	mp := &m
+	mp.filter = "ap"
+	mp.refilter()
 
-	if len(m.matched) != 2 {
-		t.Fatalf("expected 2 matches, got %d: %v", len(m.matched), m.matched)
+	if len(mp.matched) != 2 {
+		t.Fatalf("expected 2 matches, got %d: %v", len(mp.matched), mp.matched)
 	}
-	if m.matched[0] != 0 || m.matched[1] != 1 {
-		t.Errorf("matched = %v, want [0 1]", m.matched)
+	if mp.matched[0] != 0 || mp.matched[1] != 1 {
+		t.Errorf("matched = %v, want [0 1]", mp.matched)
 	}
-	if m.cursor != 0 {
-		t.Errorf("cursor should reset to 0, got %d", m.cursor)
+	if mp.cursor != 0 {
+		t.Errorf("cursor should reset to 0, got %d", mp.cursor)
 	}
 }
 
@@ -46,14 +47,15 @@ func TestSelectModel_RefilterNoMatch(t *testing.T) {
 	choices := []string{"Apple", "Banana", "Cherry"}
 	m := newSelectModel("Pick", choices, tui.SelectConfig{PageSize: 10, Loop: true})
 
-	m.filter = "zzz"
-	m.refilter()
+	mp := &m
+	mp.filter = "zzz"
+	mp.refilter()
 
-	if len(m.matched) != 0 {
-		t.Errorf("expected 0 matches, got %d", len(m.matched))
+	if len(mp.matched) != 0 {
+		t.Errorf("expected 0 matches, got %d", len(mp.matched))
 	}
-	if m.cursor != 0 {
-		t.Errorf("cursor should be 0, got %d", m.cursor)
+	if mp.cursor != 0 {
+		t.Errorf("cursor should be 0, got %d", mp.cursor)
 	}
 }
 
@@ -61,13 +63,14 @@ func TestSelectModel_RefilterEmpty(t *testing.T) {
 	choices := []string{"Apple", "Banana", "Cherry"}
 	m := newSelectModel("Pick", choices, tui.SelectConfig{PageSize: 10, Loop: true})
 
-	m.filter = "ap"
-	m.refilter()
+	mp := &m
+	mp.filter = "ap"
+	mp.refilter()
 	// Clear filter
-	m.filter = ""
-	m.refilter()
+	mp.filter = ""
+	mp.refilter()
 
-	if len(m.matched) != 3 {
-		t.Errorf("expected all 3 choices back, got %d", len(m.matched))
+	if len(mp.matched) != 3 {
+		t.Errorf("expected all 3 choices back, got %d", len(mp.matched))
 	}
 }
