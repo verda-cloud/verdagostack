@@ -3,20 +3,71 @@ package wizard
 import (
 	"fmt"
 	"reflect"
-	"strings"
 
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ProgressRegion displays a step progress bar.
+// ProgressRegionOption configures a ProgressRegion.
+type ProgressRegionOption func(*ProgressRegion)
+
+// WithProgressGradient sets the gradient colors for the progress bar.
+// Defaults to the bubbles default gradient (#5A56E0 → #EE6FF8).
+func WithProgressGradient(colorA, colorB string) ProgressRegionOption {
+	return func(r *ProgressRegion) {
+		r.colorA = colorA
+		r.colorB = colorB
+	}
+}
+
+// WithProgressSolidFill uses a single color instead of a gradient.
+func WithProgressSolidFill(color string) ProgressRegionOption {
+	return func(r *ProgressRegion) {
+		r.solidFill = color
+	}
+}
+
+// WithProgressWidth sets the bar width in characters (default: 40).
+func WithProgressWidth(w int) ProgressRegionOption {
+	return func(r *ProgressRegion) {
+		r.width = w
+	}
+}
+
+// ProgressRegion displays an animated-style step progress bar using
+// the charmbracelet/bubbles progress component for gradient rendering.
 // Responds to StepChangedMsg.
 type ProgressRegion struct {
-	last string
+	last      string
+	colorA    string
+	colorB    string
+	solidFill string
+	width     int
 }
 
 // NewProgressRegion creates a progress bar region.
-func NewProgressRegion() *ProgressRegion {
-	return &ProgressRegion{}
+func NewProgressRegion(opts ...ProgressRegionOption) *ProgressRegion {
+	r := &ProgressRegion{
+		width: 40,
+	}
+	for _, o := range opts {
+		o(r)
+	}
+	return r
+}
+
+func (r *ProgressRegion) buildBar() progress.Model {
+	var opts []progress.Option
+	opts = append(opts, progress.WithWidth(r.width))
+	opts = append(opts, progress.WithoutPercentage())
+	if r.solidFill != "" {
+		opts = append(opts, progress.WithSolidFill(r.solidFill))
+	} else if r.colorA != "" && r.colorB != "" {
+		opts = append(opts, progress.WithGradient(r.colorA, r.colorB))
+	} else {
+		opts = append(opts, progress.WithDefaultGradient())
+	}
+	return progress.New(opts...)
 }
 
 func (r *ProgressRegion) Update(msg any) (string, []any) {
@@ -30,20 +81,13 @@ func (r *ProgressRegion) Update(msg any) (string, []any) {
 		return r.last, nil
 	}
 
-	const barWidth = 30
-	filled := barWidth * sc.Current / sc.Total
-	unfilled := barWidth - filled
+	pct := float64(sc.Current) / float64(sc.Total)
+	bar := r.buildBar()
 
-	filledStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
-	unfilledStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-
-	bar := filledStyle.Render(strings.Repeat("━", filled)) +
-		unfilledStyle.Render(strings.Repeat("░", unfilled))
-
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	label := fmt.Sprintf("  Step %d of %d", sc.Current, sc.Total)
-	dimLabel := unfilledStyle.Render(label)
 
-	r.last = fmt.Sprintf("\n%s%s\n", bar, dimLabel)
+	r.last = fmt.Sprintf("\n%s%s\n", bar.ViewAs(pct), dimStyle.Render(label))
 	return r.last, nil
 }
 

@@ -68,6 +68,32 @@ func TestProgressRegion_SingleStepHidden(t *testing.T) {
 	}
 }
 
+func TestProgressRegion_CustomGradient(t *testing.T) {
+	r := NewProgressRegion(
+		WithProgressGradient("#bd93f9", "#ff79c6"),
+		WithProgressWidth(20),
+	)
+
+	out, _ := r.Update(StepChangedMsg{Current: 3, Total: 6, StepName: "gpu"})
+
+	if !strings.Contains(out, "Step 3 of 6") {
+		t.Errorf("expected 'Step 3 of 6', got: %s", out)
+	}
+	if out == "" {
+		t.Error("should render non-empty bar")
+	}
+}
+
+func TestProgressRegion_SolidFill(t *testing.T) {
+	r := NewProgressRegion(WithProgressSolidFill("#50fa7b"))
+
+	out, _ := r.Update(StepChangedMsg{Current: 1, Total: 3, StepName: "a"})
+
+	if !strings.Contains(out, "Step 1 of 3") {
+		t.Errorf("expected 'Step 1 of 3', got: %s", out)
+	}
+}
+
 func TestProgressRegion_IgnoresOtherMessages(t *testing.T) {
 	r := NewProgressRegion()
 
