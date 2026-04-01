@@ -12,8 +12,10 @@ import (
 
 type selectModel struct {
 	prompt   string
-	choices  []string
-	cursor   int
+	choices  []string // original full list — never mutated
+	filter   string   // current filter text
+	matched  []int    // indices into choices that match filter
+	cursor   int      // position within matched (not choices)
 	pageSize int
 	loop     bool
 	chosen   bool
@@ -29,9 +31,15 @@ func newSelectModel(prompt string, choices []string, cfg tui.SelectConfig) selec
 	if cursor < 0 || cursor >= len(choices) {
 		cursor = 0
 	}
+	matched := make([]int, len(choices))
+	for i := range choices {
+		matched[i] = i
+	}
 	return selectModel{
 		prompt:   prompt,
 		choices:  choices,
+		filter:   "",
+		matched:  matched,
 		cursor:   cursor,
 		pageSize: ps,
 		loop:     cfg.Loop,
