@@ -53,8 +53,8 @@ func TestProgressRegion_Render(t *testing.T) {
 	if pub != nil {
 		t.Error("progress region should not publish messages")
 	}
-	if !strings.Contains(out, "40%") {
-		t.Errorf("expected '40%%' in output, got: %s", out)
+	if !strings.Contains(out, "Step 2 of 5") {
+		t.Errorf("expected 'Step 2 of 5' in output, got: %s", out)
 	}
 }
 
@@ -76,8 +76,8 @@ func TestProgressRegion_CustomGradient(t *testing.T) {
 
 	out, _ := r.Update(StepChangedMsg{Current: 3, Total: 6, StepName: "gpu"})
 
-	if !strings.Contains(out, "50%") {
-		t.Errorf("expected '50%%' in output, got: %s", out)
+	if !strings.Contains(out, "Step 3 of 6") {
+		t.Errorf("expected 'Step 3 of 6' in output, got: %s", out)
 	}
 }
 
@@ -86,18 +86,34 @@ func TestProgressRegion_SolidFill(t *testing.T) {
 
 	out, _ := r.Update(StepChangedMsg{Current: 1, Total: 3, StepName: "a"})
 
-	if !strings.Contains(out, "33%") {
-		t.Errorf("expected '33%%' in output, got: %s", out)
+	if !strings.Contains(out, "Step 1 of 3") {
+		t.Errorf("expected 'Step 1 of 3' in output, got: %s", out)
 	}
 }
 
-func TestProgressRegion_StepLabel(t *testing.T) {
-	r := NewProgressRegion(WithProgressStepLabel(), WithoutProgressPercent())
+func TestProgressRegion_PercentMode(t *testing.T) {
+	r := NewProgressRegion(WithProgressPercent())
 
 	out, _ := r.Update(StepChangedMsg{Current: 2, Total: 5, StepName: "gpu"})
 
-	if !strings.Contains(out, "Step 2 of 5") {
-		t.Errorf("expected 'Step 2 of 5', got: %s", out)
+	if !strings.Contains(out, "40%") {
+		t.Errorf("expected '40%%' in output, got: %s", out)
+	}
+	if strings.Contains(out, "Step") {
+		t.Errorf("percent mode should not show step label, got: %s", out)
+	}
+}
+
+func TestProgressRegion_NoLabel(t *testing.T) {
+	r := NewProgressRegion(WithoutProgressStepLabel())
+
+	out, _ := r.Update(StepChangedMsg{Current: 2, Total: 5, StepName: "gpu"})
+
+	if strings.Contains(out, "Step") {
+		t.Errorf("should not show step label, got: %s", out)
+	}
+	if strings.Contains(out, "%") {
+		t.Errorf("should not show percentage, got: %s", out)
 	}
 }
 

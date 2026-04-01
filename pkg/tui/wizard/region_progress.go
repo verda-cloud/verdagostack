@@ -34,19 +34,19 @@ func WithProgressWidth(w int) ProgressRegionOption {
 	}
 }
 
-// WithoutProgressPercent hides the percentage text next to the bar.
-// By default the percentage is shown (e.g., "33%").
-func WithoutProgressPercent() ProgressRegionOption {
+// WithProgressPercent shows percentage text (e.g., "33%") instead of the
+// default "Step X of Y" label. Follows the bubbletea animated progress example.
+func WithProgressPercent() ProgressRegionOption {
 	return func(r *ProgressRegion) {
-		r.hidePercent = true
+		r.showPercent = true
+		r.hideStepLabel = true
 	}
 }
 
-// WithProgressStepLabel shows a "Step X of Y" label after the bar.
-// This is off by default (percentage is shown instead).
-func WithProgressStepLabel() ProgressRegionOption {
+// WithoutProgressStepLabel hides the "Step X of Y" label.
+func WithoutProgressStepLabel() ProgressRegionOption {
 	return func(r *ProgressRegion) {
-		r.showStepLabel = true
+		r.hideStepLabel = true
 	}
 }
 
@@ -59,8 +59,8 @@ type ProgressRegion struct {
 	colorB        string
 	solidFill     string
 	width         int
-	hidePercent   bool
-	showStepLabel bool
+	showPercent   bool
+	hideStepLabel bool
 }
 
 // NewProgressRegion creates a progress bar region.
@@ -77,7 +77,7 @@ func NewProgressRegion(opts ...ProgressRegionOption) *ProgressRegion {
 func (r *ProgressRegion) buildBar() progress.Model {
 	var opts []progress.Option
 	opts = append(opts, progress.WithWidth(r.width))
-	if r.hidePercent {
+	if !r.showPercent {
 		opts = append(opts, progress.WithoutPercentage())
 	}
 	if r.solidFill != "" {
@@ -105,7 +105,7 @@ func (r *ProgressRegion) Update(msg any) (string, []any) {
 	bar := r.buildBar()
 
 	rendered := bar.ViewAs(pct)
-	if r.showStepLabel {
+	if !r.hideStepLabel {
 		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 		label := fmt.Sprintf("  Step %d of %d", sc.Current, sc.Total)
 		rendered += dimStyle.Render(label)

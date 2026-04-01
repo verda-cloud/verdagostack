@@ -1875,12 +1875,12 @@ func TestEngine_ProgressBarCountsOnlyVisibleSteps(t *testing.T) {
 	}
 
 	output := buf.String()
-	// Absolute position: step "a" is 1/4 = 25%, step "d" is 4/4 = 100%
-	if !strings.Contains(output, "25%") {
-		t.Errorf("expected '25%%' in output, got:\n%s", output)
+	// Absolute position: step "a" is 1 of 4, step "d" is 4 of 4
+	if !strings.Contains(output, "Step 1 of 4") {
+		t.Errorf("expected 'Step 1 of 4' in output, got:\n%s", output)
 	}
-	if !strings.Contains(output, "100%") {
-		t.Errorf("expected '100%%' in output, got:\n%s", output)
+	if !strings.Contains(output, "Step 4 of 4") {
+		t.Errorf("expected 'Step 4 of 4' in output, got:\n%s", output)
 	}
 }
 
@@ -1923,14 +1923,14 @@ func TestEngine_ProgressBarWithBackNavigation(t *testing.T) {
 	}
 
 	output := buf.String()
-	// Step a = 1/2 = 50%, step b = 2/2 = 100%. Each appears twice (initial + after back).
-	count50 := strings.Count(output, "50%")
-	count100 := strings.Count(output, "100%")
-	if count50 != 2 {
-		t.Errorf("expected '50%%' to appear 2 times, got %d\noutput:\n%s", count50, output)
+	// Step a = "Step 1 of 2", step b = "Step 2 of 2". Each appears twice (initial + after back).
+	count1 := strings.Count(output, "Step 1 of 2")
+	count2 := strings.Count(output, "Step 2 of 2")
+	if count1 != 2 {
+		t.Errorf("expected 'Step 1 of 2' to appear 2 times, got %d\noutput:\n%s", count1, output)
 	}
-	if count100 != 2 {
-		t.Errorf("expected '100%%' to appear 2 times, got %d\noutput:\n%s", count100, output)
+	if count2 != 2 {
+		t.Errorf("expected 'Step 2 of 2' to appear 2 times, got %d\noutput:\n%s", count2, output)
 	}
 }
 
@@ -1991,8 +1991,8 @@ func TestEngine_RegionLayout(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "50%") {
-		t.Errorf("expected '50%%' progress in output, got:\n%s", output)
+	if !strings.Contains(output, "Step 1 of 2") {
+		t.Errorf("expected 'Step 1 of 2' in output, got:\n%s", output)
 	}
 }
 
@@ -2060,7 +2060,7 @@ func TestEngine_DefaultLayoutWhenNil(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "50%") {
+	if !strings.Contains(output, "Step 1 of 2") {
 		t.Errorf("default layout should include progress region, got:\n%s", output)
 	}
 }
