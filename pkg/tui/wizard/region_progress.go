@@ -34,15 +34,33 @@ func WithProgressWidth(w int) ProgressRegionOption {
 	}
 }
 
+// WithoutProgressPercent hides the percentage text next to the bar.
+// By default the percentage is shown (e.g., "33%").
+func WithoutProgressPercent() ProgressRegionOption {
+	return func(r *ProgressRegion) {
+		r.hidePercent = true
+	}
+}
+
+// WithProgressStepLabel shows a "Step X of Y" label after the bar.
+// This is off by default (percentage is shown instead).
+func WithProgressStepLabel() ProgressRegionOption {
+	return func(r *ProgressRegion) {
+		r.showStepLabel = true
+	}
+}
+
 // ProgressRegion displays an animated-style step progress bar using
 // the charmbracelet/bubbles progress component for gradient rendering.
 // Responds to StepChangedMsg.
 type ProgressRegion struct {
-	last      string
-	colorA    string
-	colorB    string
-	solidFill string
-	width     int
+	last          string
+	colorA        string
+	colorB        string
+	solidFill     string
+	width         int
+	hidePercent   bool
+	showStepLabel bool
 }
 
 // NewProgressRegion creates a progress bar region.
@@ -59,7 +77,9 @@ func NewProgressRegion(opts ...ProgressRegionOption) *ProgressRegion {
 func (r *ProgressRegion) buildBar() progress.Model {
 	var opts []progress.Option
 	opts = append(opts, progress.WithWidth(r.width))
-	opts = append(opts, progress.WithoutPercentage())
+	if r.hidePercent {
+		opts = append(opts, progress.WithoutPercentage())
+	}
 	if r.solidFill != "" {
 		opts = append(opts, progress.WithSolidFill(r.solidFill))
 	} else if r.colorA != "" && r.colorB != "" {
@@ -84,10 +104,14 @@ func (r *ProgressRegion) Update(msg any) (string, []any) {
 	pct := float64(sc.Current) / float64(sc.Total)
 	bar := r.buildBar()
 
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	label := fmt.Sprintf("  Step %d of %d", sc.Current, sc.Total)
+	rendered := bar.ViewAs(pct)
+	if r.showStepLabel {
+		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+		label := fmt.Sprintf("  Step %d of %d", sc.Current, sc.Total)
+		rendered += dimStyle.Render(label)
+	}
 
-	r.last = fmt.Sprintf("\n%s%s\n", bar.ViewAs(pct), dimStyle.Render(label))
+	r.last = fmt.Sprintf("\n%s\n", rendered)
 	return r.last, nil
 }
 
