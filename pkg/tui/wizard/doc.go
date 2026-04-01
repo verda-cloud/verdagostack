@@ -310,24 +310,77 @@
 // # Inter-View Messaging
 //
 // Views can publish messages that other views subscribe to. The engine
-// routes published messages to subscribers only (not broadcast to all):
+// routes published messages to subscribers only (not broadcast to all).
 //
-//	// View A publishes DataReadyMsg when it receives StepChangedMsg.
-//	func (r *LoaderView) Update(msg any) (string, []any) {
-//	    if _, ok := msg.(wizard.StepChangedMsg); ok {
-//	        data := fetchData()
-//	        return r.render(data), []any{DataReadyMsg{Items: len(data)}}
+// How it works:
+//
+//  1. The bus calls Update() on each view synchronously, in registration order.
+//  2. Each view receives the message, checks the Go struct type, and processes
+//     only the types it cares about (ignoring the rest by returning unchanged output).
+//  3. If a view returns published messages, the bus routes them to subscribers
+//     by matching the Go struct type against each view's Subscribe() list.
+//
+// There are no queues or channels — delivery is synchronous and immediate.
+//
+// # Message Ownership
+//
+// Message types are defined by the producer — the view that publishes the data:
+//
+//	// CostView defines and publishes CostUpdatedMsg.
+//	type CostUpdatedMsg struct {
+//	    Region string
+//	    Price  float64
+//	}
+//
+//	func (v *CostView) Update(msg any) (string, []any) {
+//	    if m, ok := msg.(wizard.CollectedChangedMsg); ok {
+//	        price := lookupPrice(m.Collected)
+//	        return v.render(price), []any{CostUpdatedMsg{Price: price}}
 //	    }
-//	    return r.last, nil
+//	    return v.last, nil
 //	}
 //
-//	// View B subscribes to DataReadyMsg.
-//	func (r *SummaryView) Subscribe() []reflect.Type {
-//	    return []reflect.Type{reflect.TypeFor[DataReadyMsg]()}
+// Consumers subscribe to the producer's message type. They don't know which
+// view produces it — they only know the struct type:
+//
+//	// QuotaView subscribes to CostUpdatedMsg (defined by CostView).
+//	func (v *QuotaView) Subscribe() []reflect.Type {
+//	    return []reflect.Type{reflect.TypeFor[CostUpdatedMsg]()}
 //	}
 //
-// Messages chain: if View B publishes messages in response to DataReadyMsg,
-// those are delivered to their subscribers in the same cycle.
+//	func (v *QuotaView) Update(msg any) (string, []any) {
+//	    if m, ok := msg.(CostUpdatedMsg); ok {
+//	        return fmt.Sprintf("  Region: %s ($%.2f/hr)\n", m.Region, m.Price), nil
+//	    }
+//	    return v.last, nil
+//	}
+//
+// If multiple views produce different data that a consumer needs, the consumer
+// subscribes to each type and combines them:
+//
+//	func (v *SummaryView) Subscribe() []reflect.Type {
+//	    return []reflect.Type{
+//	        reflect.TypeFor[CostUpdatedMsg](),  // from CostView
+//	        reflect.TypeFor[QuotaUpdatedMsg](), // from QuotaView
+//	    }
+//	}
+//
+//	func (v *SummaryView) Update(msg any) (string, []any) {
+//	    switch m := msg.(type) {
+//	    case CostUpdatedMsg:
+//	        v.price = m.Price
+//	    case QuotaUpdatedMsg:
+//	        v.remaining = m.Remaining
+//	    }
+//	    return v.render(), nil
+//	}
+//
+// Messages chain: if a view publishes messages in response to a received
+// message, those are delivered to their subscribers in the same cycle.
+//
+// See the wizard-views example for a complete working demonstration:
+//
+//	go run ./pkg/tui/examples/wizard-views
 //
 // # Pager
 //
