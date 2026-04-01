@@ -578,9 +578,9 @@ func (e *Engine) promptConfirm(ctx context.Context, step Step) (any, error) {
 
 // --- Rendering ---
 
-// renderRegions outputs all region renders to the writer.
+// renderRegions outputs region renders that changed since the last call.
 func (e *Engine) renderRegions() {
-	for _, output := range e.bus.RenderAll() {
+	for _, output := range e.bus.RenderChanged() {
 		if output != "" {
 			_, _ = fmt.Fprint(e.out(), output)
 		}

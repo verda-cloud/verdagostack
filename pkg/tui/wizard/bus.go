@@ -3,10 +3,11 @@ package wizard
 import "reflect"
 
 type regionSlot struct {
-	id     string
-	region Region
-	subs   map[reflect.Type]bool
-	last   string
+	id      string
+	region  Region
+	subs    map[reflect.Type]bool
+	last    string // current render output
+	printed string // last output sent to terminal
 }
 
 // MessageBus routes messages between the engine and regions.
@@ -87,6 +88,19 @@ func (b *MessageBus) RenderAll() []string {
 	renders := make([]string, len(b.slots))
 	for i, s := range b.slots {
 		renders[i] = s.last
+	}
+	return renders
+}
+
+// RenderChanged returns outputs only for regions whose render changed
+// since the last call to RenderChanged. Unchanged regions return "".
+func (b *MessageBus) RenderChanged() []string {
+	renders := make([]string, len(b.slots))
+	for i := range b.slots {
+		if b.slots[i].last != b.slots[i].printed {
+			renders[i] = b.slots[i].last
+			b.slots[i].printed = b.slots[i].last
+		}
 	}
 	return renders
 }
