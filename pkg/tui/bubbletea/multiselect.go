@@ -64,7 +64,7 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.loop {
 				m.cursor = 0
 			}
-		case " ":
+		case " ", "space":
 			if m.selected[m.cursor] {
 				delete(m.selected, m.cursor)
 			} else {
