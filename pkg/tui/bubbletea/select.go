@@ -46,6 +46,24 @@ func newSelectModel(prompt string, choices []string, cfg tui.SelectConfig) selec
 	}
 }
 
+func (m *selectModel) refilter() { //nolint:unused // called from Update in next task
+	if m.filter == "" {
+		m.matched = make([]int, len(m.choices))
+		for i := range m.choices {
+			m.matched[i] = i
+		}
+	} else {
+		lower := strings.ToLower(m.filter)
+		m.matched = m.matched[:0]
+		for i, c := range m.choices {
+			if strings.Contains(strings.ToLower(c), lower) {
+				m.matched = append(m.matched, i)
+			}
+		}
+	}
+	m.cursor = 0
+}
+
 func (m selectModel) Init() tea.Cmd { return nil }
 
 func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
