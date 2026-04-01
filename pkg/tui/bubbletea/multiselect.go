@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -50,7 +50,7 @@ func (m multiSelectModel) Init() tea.Cmd { return nil }
 
 func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "up", "k":
 			if m.cursor > 0 {
@@ -90,7 +90,7 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m multiSelectModel) View() string {
+func (m multiSelectModel) View() tea.View {
 	if m.done {
 		var names []string
 		for i, c := range m.choices {
@@ -98,7 +98,7 @@ func (m multiSelectModel) View() string {
 				names = append(names, c)
 			}
 		}
-		return fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(strings.Join(names, ", ")))
+		return tea.NewView(fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(strings.Join(names, ", "))))
 	}
 
 	var b strings.Builder
@@ -125,7 +125,7 @@ func (m multiSelectModel) View() string {
 	if m.err != "" {
 		fmt.Fprintf(&b, "  %s\n", errorStyle.Render("✗ "+m.err))
 	}
-	return b.String()
+	return tea.NewView(b.String())
 }
 
 func (m multiSelectModel) visibleRange() (int, int) {

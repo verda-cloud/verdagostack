@@ -24,13 +24,6 @@ func New(ioOpts ...func(*Prompter)) *Prompter {
 	for _, o := range ioOpts {
 		o(p)
 	}
-	// Sync the style renderer with the prompter's output writer only when
-	// the output has been redirected away from the default (os.Stdout).
-	// This avoids mutating the global renderer when multiple prompters
-	// are created with different outputs.
-	if p.out != os.Stdout {
-		SetOutput(p.out)
-	}
 	return p
 }
 

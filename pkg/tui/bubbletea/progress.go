@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -35,9 +36,9 @@ func newProgressModel(message string, cfg tui.ProgressConfig) progressModel {
 		opts = append(opts, progress.WithoutPercentage())
 	}
 	if cfg.SolidFill != "" {
-		opts = append(opts, progress.WithSolidFill(cfg.SolidFill))
+		opts = append(opts, progress.WithColors(lipgloss.Color(cfg.SolidFill)))
 	} else {
-		opts = append(opts, progress.WithGradient(cfg.ColorA, cfg.ColorB))
+		opts = append(opts, progress.WithColors(lipgloss.Color(cfg.ColorA), lipgloss.Color(cfg.ColorB)))
 	}
 
 	return progressModel{
@@ -84,10 +85,10 @@ func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case progress.FrameMsg:
-		mdl, cmd := m.progress.Update(msg)
-		m.progress = mdl.(progress.Model)
+		var cmd tea.Cmd
+		m.progress, cmd = m.progress.Update(msg)
 		return m, cmd
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if msg.String() == keyCtrlC {
 			m.done = true
 			m.finalMessage = m.message
@@ -97,11 +98,11 @@ func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m progressModel) View() string {
+func (m progressModel) View() tea.View {
 	if m.done {
-		return fmt.Sprintf("✓ %s\n", m.finalMessage)
+		return tea.NewView(fmt.Sprintf("✓ %s\n", m.finalMessage))
 	}
-	return fmt.Sprintf("%s  %s", m.message, m.progress.View())
+	return tea.NewView(fmt.Sprintf("%s  %s", m.message, m.progress.View()))
 }
 
 // --- Handle ---

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -27,7 +27,7 @@ func (m confirmModel) Init() tea.Cmd { return nil }
 
 func (m confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "y", "Y":
 			m.value = true
@@ -48,7 +48,7 @@ func (m confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m confirmModel) View() string {
+func (m confirmModel) View() tea.View {
 	hint := "y/N"
 	if m.value {
 		hint = "Y/n"
@@ -58,9 +58,9 @@ func (m confirmModel) View() string {
 		if m.value {
 			answer = "Yes"
 		}
-		return fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(answer))
+		return tea.NewView(fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(answer)))
 	}
-	return fmt.Sprintf("%s %s %s ", promptStyle.Render("?"), titleStyle.Render(m.prompt), hintStyle.Render("["+hint+"]"))
+	return tea.NewView(fmt.Sprintf("%s %s %s ", promptStyle.Render("?"), titleStyle.Render(m.prompt), hintStyle.Render("["+hint+"]")))
 }
 
 // Confirm implements tui.Prompter.

@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/term"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
@@ -49,7 +49,7 @@ func newPagerModel(content string, cfg tui.PagerConfig) pagerModel {
 		title: cfg.Title,
 	}
 	// Viewport will be sized on first WindowSizeMsg.
-	m.viewport = viewport.New(80, 24)
+	m.viewport = viewport.New(viewport.WithWidth(80), viewport.WithHeight(24))
 	m.viewport.SetContent(content)
 	return m
 }
@@ -66,10 +66,10 @@ func (m pagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			headerHeight = 1
 		}
 		footerHeight := 1
-		m.viewport.Width = msg.Width
-		m.viewport.Height = msg.Height - headerHeight - footerHeight
+		m.viewport.SetWidth(msg.Width)
+		m.viewport.SetHeight(msg.Height - headerHeight - footerHeight)
 		m.ready = true
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", keyEsc, keyCtrlC:
 			m.quitting = true
@@ -81,9 +81,9 @@ func (m pagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m pagerModel) View() string {
+func (m pagerModel) View() tea.View {
 	if !m.ready {
-		return "Loading..."
+		return tea.NewView("Loading...")
 	}
 
 	var b strings.Builder
@@ -103,7 +103,9 @@ func (m pagerModel) View() string {
 	footer := fmt.Sprintf("  ↑/↓ scroll • q quit • %.0f%%", pct)
 	b.WriteString(footerStyle.Render(footer))
 
-	return b.String()
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	return v
 }
 
 // Pager implements tui.Status.
@@ -124,7 +126,6 @@ func (p *Prompter) Pager(ctx context.Context, content string, opts ...tui.PagerO
 		tea.WithInput(p.in),
 		tea.WithOutput(p.out),
 		tea.WithContext(ctx),
-		tea.WithAltScreen(),
 	)
 
 	_, err := program.Run()

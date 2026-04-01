@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -80,13 +80,13 @@ func TestSelectModel_RefilterEmpty(t *testing.T) {
 
 // --- Task 3: Typing/Backspace/Update tests ---
 
-func sendKey(m selectModel, msg tea.KeyMsg) selectModel {
+func sendKey(m selectModel, msg tea.KeyPressMsg) selectModel {
 	result, _ := m.Update(msg)
 	return result.(selectModel)
 }
 
 func sendRune(m selectModel, r rune) selectModel {
-	return sendKey(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	return sendKey(m, tea.KeyPressMsg{Code: r, Text: string(r)})
 }
 
 func TestSelectModel_TypeToFilter(t *testing.T) {
@@ -114,7 +114,7 @@ func TestSelectModel_Backspace(t *testing.T) {
 		t.Fatalf("filter = %q, want %q", m.filter, "ap")
 	}
 
-	m = sendKey(m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m = sendKey(m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 
 	if m.filter != "a" {
 		t.Errorf("filter = %q after backspace, want %q", m.filter, "a")
@@ -164,7 +164,7 @@ func TestSelectModel_ViewShowsFilter(t *testing.T) {
 	m = sendRune(m, 'a')
 	m = sendRune(m, 'p')
 
-	view := m.View()
+	view := m.View().Content
 
 	if !strings.Contains(view, "ap") {
 		t.Errorf("view should show filter text 'ap', got:\n%s", view)
@@ -186,7 +186,7 @@ func TestSelectModel_ViewNoMatchMessage(t *testing.T) {
 
 	m = sendRune(m, 'z')
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "no matches") {
 		t.Errorf("view should show 'no matches' message, got:\n%s", view)
 	}
@@ -205,7 +205,7 @@ func TestSelectModel_ChosenReturnsOriginalIndex(t *testing.T) {
 		t.Fatalf("expected 1 match, got %d: %v", len(m.matched), m.matched)
 	}
 
-	m = sendKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = sendKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if !m.chosen {
 		t.Fatal("expected chosen=true")
@@ -238,7 +238,7 @@ func TestSelectModel_EscClearsFilterThenAborts(t *testing.T) {
 	m = sendRune(m, 'a')
 
 	// First Esc — clears filter
-	m = sendKey(m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = sendKey(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	if m.filter != "" {
 		t.Errorf("filter should be cleared, got %q", m.filter)
@@ -251,7 +251,7 @@ func TestSelectModel_EscClearsFilterThenAborts(t *testing.T) {
 	}
 
 	// Second Esc — aborts
-	m = sendKey(m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = sendKey(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	if !m.aborted {
 		t.Error("should be aborted after second Esc")
@@ -266,7 +266,7 @@ func TestSelectModel_EnterWithNoMatchesDoesNothing(t *testing.T) {
 		m = sendRune(m, r)
 	}
 
-	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	result, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = result.(selectModel)
 
 	if m.chosen {
@@ -289,7 +289,7 @@ func TestSelectModel_NavigationWrapsInFilteredList(t *testing.T) {
 		t.Fatalf("expected 2 matches, got %d", len(m.matched))
 	}
 
-	down := tea.KeyMsg{Type: tea.KeyDown}
+	down := tea.KeyPressMsg{Code: tea.KeyDown}
 	m = sendKey(m, down)
 
 	if m.cursor != 1 {
@@ -317,7 +317,7 @@ func TestSelectModel_BackspaceUnicode(t *testing.T) {
 	}
 
 	// Backspace should remove one rune (京), not one byte
-	m = sendKey(m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m = sendKey(m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 
 	if m.filter != "東" {
 		t.Errorf("filter = %q after backspace, want '東'", m.filter)
@@ -328,7 +328,7 @@ func TestSelectModel_BackspaceOnEmptyFilterIsNoop(t *testing.T) {
 	choices := []string{"Apple", "Banana"}
 	m := newSelectModel("Pick", choices, tui.SelectConfig{PageSize: 10, Loop: true})
 
-	m = sendKey(m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m = sendKey(m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 
 	if m.filter != "" {
 		t.Errorf("filter should still be empty, got %q", m.filter)
@@ -350,8 +350,8 @@ func TestSelectModel_ArrowKeysOnEmptyMatches(t *testing.T) {
 	}
 
 	// Arrow keys should be no-ops, not panic
-	m = sendKey(m, tea.KeyMsg{Type: tea.KeyDown})
-	m = sendKey(m, tea.KeyMsg{Type: tea.KeyUp})
+	m = sendKey(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = sendKey(m, tea.KeyPressMsg{Code: tea.KeyUp})
 
 	if m.cursor != 0 {
 		t.Errorf("cursor should remain 0, got %d", m.cursor)
@@ -364,13 +364,13 @@ func TestSelectModel_ViewChosenWithFilter(t *testing.T) {
 
 	m = sendRune(m, 'b')
 	m = sendRune(m, 'l')
-	m = sendKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = sendKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if !m.chosen {
 		t.Fatal("expected chosen=true")
 	}
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "Blueberry") {
 		t.Errorf("chosen view should show Blueberry, got:\n%s", view)
 	}

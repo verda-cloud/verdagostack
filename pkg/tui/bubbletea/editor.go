@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -34,7 +34,7 @@ func (m editorModel) Init() tea.Cmd { return textarea.Blink }
 
 func (m editorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+d":
 			m.submitted = true
@@ -50,12 +50,12 @@ func (m editorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m editorModel) View() string {
+func (m editorModel) View() tea.View {
 	if m.submitted {
 		lines := strings.Count(m.textarea.Value(), "\n") + 1
-		return fmt.Sprintf("? %s [%d lines]\n", m.prompt, lines)
+		return tea.NewView(fmt.Sprintf("? %s [%d lines]\n", m.prompt, lines))
 	}
-	return fmt.Sprintf("? %s (ctrl+d to submit, esc to cancel)\n%s", m.prompt, m.textarea.View())
+	return tea.NewView(fmt.Sprintf("? %s (ctrl+d to submit, esc to cancel)\n%s", m.prompt, m.textarea.View()))
 }
 
 // Editor implements tui.Prompter.

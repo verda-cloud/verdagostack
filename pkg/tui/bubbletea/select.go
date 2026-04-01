@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -91,8 +91,8 @@ func (m selectModel) Init() tea.Cmd { return nil }
 
 func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.Type {
+	case tea.KeyPressMsg:
+		switch msg.Code {
 		case tea.KeyUp:
 			m.moveUp()
 		case tea.KeyDown:
@@ -102,9 +102,6 @@ func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.chosen = true
-			return m, tea.Quit
-		case tea.KeyCtrlC:
-			m.aborted = true
 			return m, tea.Quit
 		case tea.KeyEscape:
 			if m.filter != "" {
@@ -120,29 +117,35 @@ func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filter = m.filter[:len(m.filter)-size]
 				m.refilter()
 			}
-		case tea.KeyRunes:
-			s := string(msg.Runes)
-			if m.filter == "" {
-				switch s {
-				case "k":
-					m.moveUp()
-					return m, nil
-				case "j":
-					m.moveDown()
-					return m, nil
-				}
+		default:
+			if msg.Mod&tea.ModCtrl != 0 && msg.Code == 'c' {
+				m.aborted = true
+				return m, tea.Quit
 			}
-			m.filter += s
-			m.refilter()
+			if msg.Text != "" {
+				s := msg.Text
+				if m.filter == "" {
+					switch s {
+					case "k":
+						m.moveUp()
+						return m, nil
+					case "j":
+						m.moveDown()
+						return m, nil
+					}
+				}
+				m.filter += s
+				m.refilter()
+			}
 		}
 	}
 	return m, nil
 }
 
-func (m selectModel) View() string {
+func (m selectModel) View() tea.View {
 	if m.chosen {
 		selected := m.choices[m.matched[m.cursor]]
-		return fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(selected))
+		return tea.NewView(fmt.Sprintf("%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), answerStyle.Render(selected)))
 	}
 
 	var b strings.Builder
@@ -154,7 +157,7 @@ func (m selectModel) View() string {
 
 	if len(m.matched) == 0 {
 		fmt.Fprintf(&b, "    %s\n", dimStyle.Render("no matches"))
-		return b.String()
+		return tea.NewView(b.String())
 	}
 
 	start, end := m.visibleRange()
@@ -166,7 +169,7 @@ func (m selectModel) View() string {
 			fmt.Fprintf(&b, "    %s\n", dimStyle.Render(label))
 		}
 	}
-	return b.String()
+	return tea.NewView(b.String())
 }
 
 func (m selectModel) visibleRange() (int, int) {

@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/progress"
+	"charm.land/lipgloss/v2"
 )
 
 // ProgressRegionOption configures a ProgressRegion.
 type ProgressRegionOption func(*ProgressRegion)
 
 // WithProgressGradient sets the gradient colors for the progress bar.
-// Defaults to the bubbles default gradient (#5A56E0 → #EE6FF8).
+// Defaults to the bubbles default gradient (#5A56E0 -> #EE6FF8).
 func WithProgressGradient(colorA, colorB string) ProgressRegionOption {
 	return func(r *ProgressRegion) {
 		r.colorA = colorA
@@ -81,11 +81,11 @@ func (r *ProgressRegion) buildBar() progress.Model {
 		opts = append(opts, progress.WithoutPercentage())
 	}
 	if r.solidFill != "" {
-		opts = append(opts, progress.WithSolidFill(r.solidFill))
+		opts = append(opts, progress.WithColors(lipgloss.Color(r.solidFill)))
 	} else if r.colorA != "" && r.colorB != "" {
-		opts = append(opts, progress.WithGradient(r.colorA, r.colorB))
+		opts = append(opts, progress.WithColors(lipgloss.Color(r.colorA), lipgloss.Color(r.colorB)))
 	} else {
-		opts = append(opts, progress.WithDefaultGradient())
+		opts = append(opts, progress.WithDefaultBlend())
 	}
 	return progress.New(opts...)
 }
