@@ -91,14 +91,14 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	e.steps = make([]stepRuntime, len(flow.Steps))
 	e.store.Reset()
 
-	// Initialize message bus with layout regions (or default).
+	// Initialize message bus with layout views (or default).
 	e.bus = NewMessageBus()
 	layout := flow.Layout
 	if layout == nil {
-		layout = []RegionDef{{ID: "progress", Region: NewProgressRegion()}}
+		layout = []ViewDef{{ID: "progress", View: NewProgressView()}}
 	}
 	for _, def := range layout {
-		e.bus.Register(def.ID, def.Region)
+		e.bus.Register(def.ID, def.View)
 	}
 
 	// Wire store change notifications to the message bus.
@@ -203,7 +203,7 @@ func (e *Engine) handleEmptyChoices(step Step) (bool, error) {
 
 // handlePrompt prompts the user and processes the result.
 func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) error {
-	// Broadcast step change to all regions and render.
+	// Broadcast step change to all views and render.
 	// Use absolute position (e.current+1 of len(Steps)) so the bar is
 	// stable — it always increments and the total never changes, even
 	// when steps are skipped or fixed.
@@ -213,7 +213,7 @@ func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) 
 		StepName:  step.Name,
 		Collected: e.store.Collected(),
 	})
-	e.renderRegions()
+	e.renderViews()
 
 	canGoBack := e.hasEditablePriorStep()
 	value, err := e.prompt(ctx, step, choices, canGoBack)
@@ -263,13 +263,13 @@ func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) 
 	}
 	e.transition(e.current, stateCompleted, value)
 
-	// Broadcast collected change to all regions and re-render.
+	// Broadcast collected change to all views and re-render.
 	e.bus.Broadcast(CollectedChangedMsg{
 		Key:       step.Name,
 		Value:     value,
 		Collected: e.store.Collected(),
 	})
-	e.renderRegions()
+	e.renderViews()
 
 	e.invalidateDownstream(e.current)
 	e.current++
@@ -578,8 +578,8 @@ func (e *Engine) promptConfirm(ctx context.Context, step Step) (any, error) {
 
 // --- Rendering ---
 
-// renderRegions outputs region renders that changed since the last call.
-func (e *Engine) renderRegions() {
+// renderViews outputs view renders that changed since the last call.
+func (e *Engine) renderViews() {
 	for _, output := range e.bus.RenderChanged() {
 		if output != "" {
 			_, _ = fmt.Fprint(e.out(), output)

@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// Store is the engine's shared data layer. Regions read from it,
+// Store is the engine's shared data layer. Views read from it,
 // the engine and loaders write to it.
 type Store struct {
 	collected map[string]any
@@ -63,7 +63,7 @@ func (s *Store) Get(key string) (any, bool) {
 
 // Set writes an arbitrary value to the store.
 // If the engine has wired up a change callback (via the message bus),
-// it broadcasts a StoreChangedMsg to all regions.
+// it broadcasts a StoreChangedMsg to all views.
 func (s *Store) Set(key string, value any) {
 	s.mu.Lock()
 	s.data[key] = value

@@ -2,24 +2,24 @@ package wizard
 
 import "reflect"
 
-// Region is an actor that receives messages and renders output.
-// Each region maintains its own state and renders independently.
-type Region interface {
+// View is an actor that receives messages and renders output.
+// Each view maintains its own state and renders independently.
+type View interface {
 	// Update receives a message and returns:
-	// - render: the new display string for this region
-	// - publish: optional messages to broadcast to other regions
+	// - render: the new display string for this view
+	// - publish: optional messages to broadcast to other views
 	Update(msg any) (render string, publish []any)
 
-	// Subscribe returns the message types this region listens to.
+	// Subscribe returns the message types this view listens to.
 	// nil means receive all engine broadcasts only.
 	// Non-nil means receive only those types (plus engine broadcasts).
 	Subscribe() []reflect.Type
 }
 
-// RegionDef defines a region in the layout.
-type RegionDef struct {
-	ID     string
-	Region Region
+// ViewDef defines a view in the layout.
+type ViewDef struct {
+	ID   string
+	View View
 }
 
 // --- Engine broadcast messages ---

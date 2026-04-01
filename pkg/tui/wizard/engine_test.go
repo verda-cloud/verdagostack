@@ -1963,11 +1963,11 @@ func TestEngine_SingleStepNoProgressBar(t *testing.T) {
 	}
 }
 
-func TestEngine_RegionLayout(t *testing.T) {
+func TestEngine_ViewLayout(t *testing.T) {
 	flow := &Flow{
 		Name: "test",
-		Layout: []RegionDef{
-			{ID: "progress", Region: NewProgressRegion()},
+		Layout: []ViewDef{
+			{ID: "progress", View: NewProgressView()},
 		},
 		Steps: []Step{
 			{
@@ -2063,6 +2063,6 @@ func TestEngine_DefaultLayoutWhenNil(t *testing.T) {
 
 	output := buf.String()
 	if !strings.Contains(output, "Step 1 of 2") {
-		t.Errorf("default layout should include progress region, got:\n%s", output)
+		t.Errorf("default layout should include progress view, got:\n%s", output)
 	}
 }

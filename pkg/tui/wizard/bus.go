@@ -2,17 +2,17 @@ package wizard
 
 import "reflect"
 
-type regionSlot struct {
+type viewSlot struct {
 	id      string
-	region  Region
+	view    View
 	subs    map[reflect.Type]bool
 	last    string // current render output
 	printed string // last output sent to terminal
 }
 
-// MessageBus routes messages between the engine and regions.
+// MessageBus routes messages between the engine and views.
 type MessageBus struct {
-	slots []regionSlot
+	slots []viewSlot
 }
 
 // NewMessageBus creates an empty message bus.
@@ -20,33 +20,33 @@ func NewMessageBus() *MessageBus {
 	return &MessageBus{}
 }
 
-// Register adds a region to the bus.
-func (b *MessageBus) Register(id string, r Region) {
+// Register adds a view to the bus.
+func (b *MessageBus) Register(id string, v View) {
 	subs := make(map[reflect.Type]bool)
-	for _, t := range r.Subscribe() {
+	for _, t := range v.Subscribe() {
 		subs[t] = true
 	}
-	b.slots = append(b.slots, regionSlot{
-		id:     id,
-		region: r,
-		subs:   subs,
+	b.slots = append(b.slots, viewSlot{
+		id:   id,
+		view: v,
+		subs: subs,
 	})
 }
 
-// Broadcast sends a message to ALL regions (engine-level events).
-// Processes any published messages from regions (chained delivery).
+// Broadcast sends a message to ALL views (engine-level events).
+// Processes any published messages from views (chained delivery).
 func (b *MessageBus) Broadcast(msg any) {
 	var pending []any
 	for i := range b.slots {
-		render, published := b.slots[i].region.Update(msg)
+		render, published := b.slots[i].view.Update(msg)
 		b.slots[i].last = render
 		pending = append(pending, published...)
 	}
 	b.deliverPending(pending)
 }
 
-// Publish sends messages only to regions that subscribed to those types.
-// Processes any published messages from regions (chained delivery).
+// Publish sends messages only to views that subscribed to those types.
+// Processes any published messages from views (chained delivery).
 func (b *MessageBus) Publish(from string, msgs []any) {
 	var pending []any
 	for _, msg := range msgs {
@@ -56,7 +56,7 @@ func (b *MessageBus) Publish(from string, msgs []any) {
 				continue
 			}
 			if b.slots[i].subs[msgType] {
-				render, published := b.slots[i].region.Update(msg)
+				render, published := b.slots[i].view.Update(msg)
 				b.slots[i].last = render
 				pending = append(pending, published...)
 			}
@@ -65,7 +65,7 @@ func (b *MessageBus) Publish(from string, msgs []any) {
 	b.deliverPending(pending)
 }
 
-// deliverPending processes chained messages (published by regions during Update).
+// deliverPending processes chained messages (published by views during Update).
 func (b *MessageBus) deliverPending(msgs []any) {
 	for len(msgs) > 0 {
 		var next []any
@@ -73,7 +73,7 @@ func (b *MessageBus) deliverPending(msgs []any) {
 			msgType := reflect.TypeOf(msg)
 			for i := range b.slots {
 				if b.slots[i].subs[msgType] {
-					render, published := b.slots[i].region.Update(msg)
+					render, published := b.slots[i].view.Update(msg)
 					b.slots[i].last = render
 					next = append(next, published...)
 				}
@@ -83,7 +83,7 @@ func (b *MessageBus) deliverPending(msgs []any) {
 	}
 }
 
-// RenderAll returns the last rendered output of each region in order.
+// RenderAll returns the last rendered output of each view in order.
 func (b *MessageBus) RenderAll() []string {
 	renders := make([]string, len(b.slots))
 	for i, s := range b.slots {
@@ -92,8 +92,8 @@ func (b *MessageBus) RenderAll() []string {
 	return renders
 }
 
-// RenderChanged returns outputs only for regions whose render changed
-// since the last call to RenderChanged. Unchanged regions return "".
+// RenderChanged returns outputs only for views whose render changed
+// since the last call to RenderChanged. Unchanged views return "".
 func (b *MessageBus) RenderChanged() []string {
 	renders := make([]string, len(b.slots))
 	for i := range b.slots {

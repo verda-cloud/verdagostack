@@ -5,25 +5,25 @@ import (
 	"testing"
 )
 
-type testRegion struct {
+type testView struct {
 	received  []any
 	subs      []reflect.Type
 	output    string
 	publishes []any
 }
 
-func (r *testRegion) Update(msg any) (string, []any) {
+func (r *testView) Update(msg any) (string, []any) {
 	r.received = append(r.received, msg)
 	return r.output, r.publishes
 }
 
-func (r *testRegion) Subscribe() []reflect.Type {
+func (r *testView) Subscribe() []reflect.Type {
 	return r.subs
 }
 
-func TestBus_BroadcastReachesAllRegions(t *testing.T) {
-	r1 := &testRegion{output: "r1"}
-	r2 := &testRegion{output: "r2"}
+func TestBus_BroadcastReachesAllViews(t *testing.T) {
+	r1 := &testView{output: "r1"}
+	r2 := &testView{output: "r2"}
 
 	bus := NewMessageBus()
 	bus.Register("r1", r1)
@@ -42,8 +42,8 @@ func TestBus_BroadcastReachesAllRegions(t *testing.T) {
 func TestBus_PublishRoutesToSubscribers(t *testing.T) {
 	type CustomMsg struct{ Value int }
 
-	r1 := &testRegion{output: "r1", subs: []reflect.Type{reflect.TypeFor[CustomMsg]()}}
-	r2 := &testRegion{output: "r2"}
+	r1 := &testView{output: "r1", subs: []reflect.Type{reflect.TypeFor[CustomMsg]()}}
+	r2 := &testView{output: "r2"}
 
 	bus := NewMessageBus()
 	bus.Register("r1", r1)
@@ -63,12 +63,12 @@ func TestBus_PublishTriggersChain(t *testing.T) {
 	type MsgA struct{}
 	type MsgB struct{}
 
-	r1 := &testRegion{
+	r1 := &testView{
 		output:    "r1",
 		subs:      []reflect.Type{reflect.TypeFor[MsgA]()},
 		publishes: []any{MsgB{}},
 	}
-	r2 := &testRegion{
+	r2 := &testView{
 		output: "r2",
 		subs:   []reflect.Type{reflect.TypeFor[MsgB]()},
 	}
@@ -88,8 +88,8 @@ func TestBus_PublishTriggersChain(t *testing.T) {
 }
 
 func TestBus_RenderAll(t *testing.T) {
-	r1 := &testRegion{output: "line1"}
-	r2 := &testRegion{output: "line2"}
+	r1 := &testView{output: "line1"}
+	r2 := &testView{output: "line2"}
 
 	bus := NewMessageBus()
 	bus.Register("r1", r1)
@@ -104,14 +104,14 @@ func TestBus_RenderAll(t *testing.T) {
 	}
 }
 
-func TestBus_RegionToRegionPubSub(t *testing.T) {
+func TestBus_ViewToViewPubSub(t *testing.T) {
 	type DataReadyMsg struct{ Items int }
 
-	loader := &testRegion{
+	loader := &testView{
 		output:    "",
 		publishes: []any{DataReadyMsg{Items: 42}},
 	}
-	summary := &testRegion{
+	summary := &testView{
 		output: "waiting",
 	}
 
@@ -132,7 +132,7 @@ func TestBus_RegionToRegionPubSub(t *testing.T) {
 	}
 
 	// Now test with subscription
-	subscribedSummary := &testRegion{
+	subscribedSummary := &testView{
 		output: "updated",
 		subs:   []reflect.Type{reflect.TypeFor[DataReadyMsg]()},
 	}

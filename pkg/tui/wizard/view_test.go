@@ -21,8 +21,8 @@ func TestStepChangedMsg_Fields(t *testing.T) {
 	}
 }
 
-func TestRegionDef_HasID(t *testing.T) {
-	def := RegionDef{
+func TestViewDef_HasID(t *testing.T) {
+	def := ViewDef{
 		ID: "progress",
 	}
 	if def.ID != "progress" {
@@ -45,21 +45,21 @@ func TestSubscribeFilter(t *testing.T) {
 	}
 }
 
-func TestProgressRegion_Render(t *testing.T) {
-	r := NewProgressRegion()
+func TestProgressView_Render(t *testing.T) {
+	r := NewProgressView()
 
 	out, pub := r.Update(StepChangedMsg{Current: 2, Total: 5, StepName: "gpu"})
 
 	if pub != nil {
-		t.Error("progress region should not publish messages")
+		t.Error("progress view should not publish messages")
 	}
 	if !strings.Contains(out, "Step 2 of 5") {
 		t.Errorf("expected 'Step 2 of 5' in output, got: %s", out)
 	}
 }
 
-func TestProgressRegion_SingleStepHidden(t *testing.T) {
-	r := NewProgressRegion()
+func TestProgressView_SingleStepHidden(t *testing.T) {
+	r := NewProgressView()
 
 	out, _ := r.Update(StepChangedMsg{Current: 1, Total: 1, StepName: "only"})
 
@@ -68,8 +68,8 @@ func TestProgressRegion_SingleStepHidden(t *testing.T) {
 	}
 }
 
-func TestProgressRegion_CustomGradient(t *testing.T) {
-	r := NewProgressRegion(
+func TestProgressView_CustomGradient(t *testing.T) {
+	r := NewProgressView(
 		WithProgressGradient("#bd93f9", "#ff79c6"),
 		WithProgressWidth(20),
 	)
@@ -81,8 +81,8 @@ func TestProgressRegion_CustomGradient(t *testing.T) {
 	}
 }
 
-func TestProgressRegion_SolidFill(t *testing.T) {
-	r := NewProgressRegion(WithProgressSolidFill("#50fa7b"))
+func TestProgressView_SolidFill(t *testing.T) {
+	r := NewProgressView(WithProgressSolidFill("#50fa7b"))
 
 	out, _ := r.Update(StepChangedMsg{Current: 1, Total: 3, StepName: "a"})
 
@@ -91,8 +91,8 @@ func TestProgressRegion_SolidFill(t *testing.T) {
 	}
 }
 
-func TestProgressRegion_PercentMode(t *testing.T) {
-	r := NewProgressRegion(WithProgressPercent())
+func TestProgressView_PercentMode(t *testing.T) {
+	r := NewProgressView(WithProgressPercent())
 
 	out, _ := r.Update(StepChangedMsg{Current: 2, Total: 5, StepName: "gpu"})
 
@@ -104,8 +104,8 @@ func TestProgressRegion_PercentMode(t *testing.T) {
 	}
 }
 
-func TestProgressRegion_NoLabel(t *testing.T) {
-	r := NewProgressRegion(WithoutProgressStepLabel())
+func TestProgressView_NoLabel(t *testing.T) {
+	r := NewProgressView(WithoutProgressStepLabel())
 
 	out, _ := r.Update(StepChangedMsg{Current: 2, Total: 5, StepName: "gpu"})
 
@@ -117,8 +117,8 @@ func TestProgressRegion_NoLabel(t *testing.T) {
 	}
 }
 
-func TestProgressRegion_IgnoresOtherMessages(t *testing.T) {
-	r := NewProgressRegion()
+func TestProgressView_IgnoresOtherMessages(t *testing.T) {
+	r := NewProgressView()
 
 	out, _ := r.Update(CollectedChangedMsg{Key: "x", Value: "y"})
 
@@ -127,8 +127,8 @@ func TestProgressRegion_IgnoresOtherMessages(t *testing.T) {
 	}
 }
 
-func TestCustomRegion_ReactsToCollectedChange(t *testing.T) {
-	cost := &costRegion{}
+func TestCustomView_ReactsToCollectedChange(t *testing.T) {
+	cost := &costView{}
 
 	bus := NewMessageBus()
 	bus.Register("cost", cost)
@@ -147,11 +147,11 @@ func TestCustomRegion_ReactsToCollectedChange(t *testing.T) {
 	}
 }
 
-type costRegion struct {
+type costView struct {
 	last string
 }
 
-func (r *costRegion) Update(msg any) (string, []any) {
+func (r *costView) Update(msg any) (string, []any) {
 	if m, ok := msg.(CollectedChangedMsg); ok {
 		if m.Collected["instance-type"] == "1H100.80S" {
 			r.last = "  Estimated cost: $3.20/hr"
@@ -160,6 +160,6 @@ func (r *costRegion) Update(msg any) (string, []any) {
 	return r.last, nil
 }
 
-func (r *costRegion) Subscribe() []reflect.Type {
+func (r *costView) Subscribe() []reflect.Type {
 	return nil
 }

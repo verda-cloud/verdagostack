@@ -51,7 +51,7 @@ type Step struct {
 type Flow struct {
 	Name   string
 	Steps  []Step
-	Layout []RegionDef // optional; nil = default layout (progress bar)
+	Layout []ViewDef // optional; nil = default layout (progress bar)
 }
 
 // StaticChoices returns a LoaderFunc that always returns the given choices.

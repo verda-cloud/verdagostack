@@ -7,10 +7,10 @@
 // password, or multi-select). The engine handles skip logic, back navigation,
 // validation, default values, and dependency-driven choice loading.
 //
-// The engine uses a composable region/actor layout. Each visual region is an
+// The engine uses a composable view/actor layout. Each visual view is an
 // independent actor with its own mailbox — it receives typed messages and
 // renders independently. The engine acts as a message bus, broadcasting
-// lifecycle events and routing inter-region messages.
+// lifecycle events and routing inter-view messages.
 //
 // # Quick Start
 //
@@ -161,24 +161,24 @@
 //
 // Collected values are managed by the engine (set on step completion,
 // cleared on back navigation). Arbitrary data is managed by your code —
-// loaders can write values that custom regions display.
+// loaders can write values that custom views display.
 //
 // After the flow completes, read results via:
 //
 //	engine.Collected()             // same as store.Collected()
 //	engine.Store().Get("cost")     // arbitrary data written during the flow
 //
-// # Layout and Regions (Actor Model)
+// # Layout and Views (Actor Model)
 //
 // The engine uses a composable actor model for rendering. The terminal is a
-// vertical stack of regions, each an independent actor with its own mailbox.
+// vertical stack of views, each an independent actor with its own mailbox.
 // The engine acts as a message bus: it broadcasts lifecycle events and routes
-// inter-region messages.
+// inter-view messages.
 //
 // Default layout (when Flow.Layout is nil):
 //
 //	┌─────────────────────────────────────────────┐
-//	│ ████████████████░░░░░░░░░░  Step 3 of 10   │  ← ProgressRegion (gradient bar)
+//	│ ████████████████░░░░░░░░░░  Step 3 of 10   │  ← ProgressView (gradient bar)
 //	│ ? Select instance type                      │  ← Prompt (engine's sequential loop)
 //	│   > Standard-2vCPU-8GB                      │
 //	│     Standard-4vCPU-16GB                     │
@@ -186,49 +186,49 @@
 //
 // # How the Actor Model Works
 //
-// Each region is an actor. It receives messages, updates its internal state,
-// and returns a render string. The engine only prints a region's output when
+// Each view is an actor. It receives messages, updates its internal state,
+// and returns a render string. The engine only prints a view's output when
 // it actually changes, so redundant renders are never written to the terminal.
 //
 // The message flow for one step:
 //
-//	Engine                         Regions
-//	──────                         ───────
-//	1. Broadcast StepChangedMsg ──→ ProgressRegion: renders "Step 3 of 10"  (changed → print)
-//	                            ──→ CostRegion: no change                   (skip)
+//	Engine                         Views
+//	──────                         ─────
+//	1. Broadcast StepChangedMsg ──→ ProgressView: renders "Step 3 of 10"  (changed → print)
+//	                            ──→ CostView: no change                   (skip)
 //	2. Run prompt (blocks for user input)
 //	3. User picks a value
-//	4. Broadcast CollectedChanged ─→ ProgressRegion: same output            (unchanged → skip)
-//	                              ─→ CostRegion: recalculates "$3.20/hr"    (changed → print)
+//	4. Broadcast CollectedChanged ─→ ProgressView: same output            (unchanged → skip)
+//	                              ─→ CostView: recalculates "$3.20/hr"    (changed → print)
 //	5. Advance to next step
 //
 // Key design properties:
 //
-//   - Regions are decoupled: a CostRegion doesn't know about ProgressRegion.
+//   - Views are decoupled: a CostView doesn't know about ProgressView.
 //     They communicate through typed messages, not direct calls.
-//   - Only changed output is printed: the engine tracks each region's last
-//     printed output and skips unchanged regions. This prevents duplicate
-//     renders (e.g., ProgressRegion re-printing the same bar after a value
+//   - Only changed output is printed: the engine tracks each view's last
+//     printed output and skips unchanged views. This prevents duplicate
+//     renders (e.g., ProgressView re-printing the same bar after a value
 //     change that doesn't affect it).
-//   - Regions can publish messages to each other. The engine routes published
-//     messages to subscribers, enabling region-to-region communication.
+//   - Views can publish messages to each other. The engine routes published
+//     messages to subscribers, enabling view-to-view communication.
 //
-// # Region Interface
+// # View Interface
 //
-// A region implements two methods:
+// A view implements two methods:
 //
-//	type Region interface {
+//	type View interface {
 //	    Update(msg any) (render string, publish []any)
 //	    Subscribe() []reflect.Type
 //	}
 //
 // Update receives a message and returns:
 //   - render: the new display string (return the same string if nothing changed)
-//   - publish: optional messages to broadcast to other regions (nil if none)
+//   - publish: optional messages to broadcast to other views (nil if none)
 //
-// Subscribe returns the message types this region listens to. Return nil to
+// Subscribe returns the message types this view listens to. Return nil to
 // receive all engine broadcasts. Return specific types to also receive
-// inter-region messages of those types.
+// inter-view messages of those types.
 //
 // # Built-in Messages
 //
@@ -240,61 +240,61 @@
 //   - [CollectedChangedMsg] — broadcast AFTER a step completes. Contains
 //     Key (step name), Value (selected value), and the updated Collected
 //     snapshot. Use this for reactive displays (cost, summary, etc.).
-//   - [StoreChangedMsg] — broadcast when a loader or region calls
+//   - [StoreChangedMsg] — broadcast when a loader or view calls
 //     store.Set(). Contains Key and Value. Use this for displays driven
 //     by arbitrary data written during loading.
 //
 // # Progress Bar
 //
-// The built-in [ProgressRegion] uses the charmbracelet/bubbles progress
+// The built-in [ProgressView] uses the charmbracelet/bubbles progress
 // component for gradient-colored rendering (same style as the bubbletea
 // static progress example). It responds to [StepChangedMsg] and shows
 // "Step X of Y" by default. Hidden for single-step flows.
 //
 // Default (bubbles default gradient #5A56E0 → #EE6FF8, step label):
 //
-//	wizard.NewProgressRegion()
+//	wizard.NewProgressView()
 //
 // Custom gradient to match your theme:
 //
-//	wizard.NewProgressRegion(
+//	wizard.NewProgressView(
 //	    wizard.WithProgressGradient("#bd93f9", "#ff79c6"),
 //	)
 //
 // Percentage mode (animated progress example style):
 //
-//	wizard.NewProgressRegion(wizard.WithProgressPercent())
+//	wizard.NewProgressView(wizard.WithProgressPercent())
 //
 // Solid fill, custom width:
 //
-//	wizard.NewProgressRegion(
+//	wizard.NewProgressView(
 //	    wizard.WithProgressSolidFill("#50fa7b"),
 //	    wizard.WithProgressWidth(30),
 //	)
 //
 // # Custom Layout
 //
-// Custom layout with additional regions:
+// Custom layout with additional views:
 //
 //	flow := &wizard.Flow{
-//	    Layout: []wizard.RegionDef{
-//	        {ID: "progress", Region: wizard.NewProgressRegion(
+//	    Layout: []wizard.ViewDef{
+//	        {ID: "progress", View: wizard.NewProgressView(
 //	            wizard.WithProgressGradient("#bd93f9", "#ff79c6"),
 //	        )},
-//	        {ID: "cost", Region: &CostRegion{}},
+//	        {ID: "cost", View: &CostView{}},
 //	    },
 //	    Steps: []wizard.Step{...},
 //	}
 //
-// # Custom Region Example
+// # Custom View Example
 //
-// A region that shows estimated cost, updating when collected values change:
+// A view that shows estimated cost, updating when collected values change:
 //
-//	type CostRegion struct {
+//	type CostView struct {
 //	    last string
 //	}
 //
-//	func (r *CostRegion) Update(msg any) (string, []any) {
+//	func (r *CostView) Update(msg any) (string, []any) {
 //	    if m, ok := msg.(wizard.CollectedChangedMsg); ok {
 //	        if price, ok := calculatePrice(m.Collected); ok {
 //	            r.last = fmt.Sprintf("  Estimated cost: $%.2f/hr\n", price)
@@ -303,17 +303,17 @@
 //	    return r.last, nil  // unchanged output → engine skips printing
 //	}
 //
-//	func (r *CostRegion) Subscribe() []reflect.Type {
+//	func (r *CostView) Subscribe() []reflect.Type {
 //	    return nil // receive all engine broadcasts
 //	}
 //
-// # Inter-Region Messaging
+// # Inter-View Messaging
 //
-// Regions can publish messages that other regions subscribe to. The engine
+// Views can publish messages that other views subscribe to. The engine
 // routes published messages to subscribers only (not broadcast to all):
 //
-//	// Region A publishes DataReadyMsg when it receives StepChangedMsg.
-//	func (r *LoaderRegion) Update(msg any) (string, []any) {
+//	// View A publishes DataReadyMsg when it receives StepChangedMsg.
+//	func (r *LoaderView) Update(msg any) (string, []any) {
 //	    if _, ok := msg.(wizard.StepChangedMsg); ok {
 //	        data := fetchData()
 //	        return r.render(data), []any{DataReadyMsg{Items: len(data)}}
@@ -321,12 +321,12 @@
 //	    return r.last, nil
 //	}
 //
-//	// Region B subscribes to DataReadyMsg.
-//	func (r *SummaryRegion) Subscribe() []reflect.Type {
+//	// View B subscribes to DataReadyMsg.
+//	func (r *SummaryView) Subscribe() []reflect.Type {
 //	    return []reflect.Type{reflect.TypeFor[DataReadyMsg]()}
 //	}
 //
-// Messages chain: if Region B publishes messages in response to DataReadyMsg,
+// Messages chain: if View B publishes messages in response to DataReadyMsg,
 // those are delivered to their subscribers in the same cycle.
 //
 // # Pager

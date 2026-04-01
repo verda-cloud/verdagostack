@@ -8,52 +8,52 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// ProgressRegionOption configures a ProgressRegion.
-type ProgressRegionOption func(*ProgressRegion)
+// ProgressViewOption configures a ProgressView.
+type ProgressViewOption func(*ProgressView)
 
 // WithProgressGradient sets the gradient colors for the progress bar.
 // Defaults to the bubbles default gradient (#5A56E0 -> #EE6FF8).
-func WithProgressGradient(colorA, colorB string) ProgressRegionOption {
-	return func(r *ProgressRegion) {
+func WithProgressGradient(colorA, colorB string) ProgressViewOption {
+	return func(r *ProgressView) {
 		r.colorA = colorA
 		r.colorB = colorB
 	}
 }
 
 // WithProgressSolidFill uses a single color instead of a gradient.
-func WithProgressSolidFill(color string) ProgressRegionOption {
-	return func(r *ProgressRegion) {
+func WithProgressSolidFill(color string) ProgressViewOption {
+	return func(r *ProgressView) {
 		r.solidFill = color
 	}
 }
 
 // WithProgressWidth sets the bar width in characters (default: 40).
-func WithProgressWidth(w int) ProgressRegionOption {
-	return func(r *ProgressRegion) {
+func WithProgressWidth(w int) ProgressViewOption {
+	return func(r *ProgressView) {
 		r.width = w
 	}
 }
 
 // WithProgressPercent shows percentage text (e.g., "33%") instead of the
 // default "Step X of Y" label. Follows the bubbletea animated progress example.
-func WithProgressPercent() ProgressRegionOption {
-	return func(r *ProgressRegion) {
+func WithProgressPercent() ProgressViewOption {
+	return func(r *ProgressView) {
 		r.showPercent = true
 		r.hideStepLabel = true
 	}
 }
 
 // WithoutProgressStepLabel hides the "Step X of Y" label.
-func WithoutProgressStepLabel() ProgressRegionOption {
-	return func(r *ProgressRegion) {
+func WithoutProgressStepLabel() ProgressViewOption {
+	return func(r *ProgressView) {
 		r.hideStepLabel = true
 	}
 }
 
-// ProgressRegion displays an animated-style step progress bar using
+// ProgressView displays an animated-style step progress bar using
 // the charmbracelet/bubbles progress component for gradient rendering.
 // Responds to StepChangedMsg.
-type ProgressRegion struct {
+type ProgressView struct {
 	last          string
 	colorA        string
 	colorB        string
@@ -63,9 +63,9 @@ type ProgressRegion struct {
 	hideStepLabel bool
 }
 
-// NewProgressRegion creates a progress bar region.
-func NewProgressRegion(opts ...ProgressRegionOption) *ProgressRegion {
-	r := &ProgressRegion{
+// NewProgressView creates a progress bar view.
+func NewProgressView(opts ...ProgressViewOption) *ProgressView {
+	r := &ProgressView{
 		width: 40,
 	}
 	for _, o := range opts {
@@ -74,7 +74,7 @@ func NewProgressRegion(opts ...ProgressRegionOption) *ProgressRegion {
 	return r
 }
 
-func (r *ProgressRegion) buildBar() progress.Model {
+func (r *ProgressView) buildBar() progress.Model {
 	var opts []progress.Option
 	opts = append(opts, progress.WithWidth(r.width))
 	if !r.showPercent {
@@ -90,7 +90,7 @@ func (r *ProgressRegion) buildBar() progress.Model {
 	return progress.New(opts...)
 }
 
-func (r *ProgressRegion) Update(msg any) (string, []any) {
+func (r *ProgressView) Update(msg any) (string, []any) {
 	sc, ok := msg.(StepChangedMsg)
 	if !ok {
 		return r.last, nil
@@ -115,6 +115,6 @@ func (r *ProgressRegion) Update(msg any) (string, []any) {
 	return r.last, nil
 }
 
-func (r *ProgressRegion) Subscribe() []reflect.Type {
+func (r *ProgressView) Subscribe() []reflect.Type {
 	return nil
 }
