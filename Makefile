@@ -70,17 +70,8 @@ fmt: ## Format Go code
 	fi
 	@echo "✓ Formatting complete!"
 
-security: ## Run security checks (gosec + govulncheck)
-	@echo "→ Running security checks..."
-	@echo "  1. Running gosec (via golangci-lint)..."
-	@golangci-lint run --no-config -E gosec ./...
-	@echo "  2. Running govulncheck..."
-	@if ! command -v govulncheck >/dev/null 2>&1; then \
-		echo "    Installing govulncheck..."; \
-		go install golang.org/x/vuln/cmd/govulncheck@latest; \
-	fi
-	@govulncheck ./...
-	@echo "✓ Security checks complete!"
+security: ## Run security checks (gosec + govulncheck + gitleaks + trivy + osv-scanner)
+	@./scripts/security-scan.sh
 
 pre-commit: ## Run all pre-commit hooks on all files
 	@echo "→ Running pre-commit hooks on all files..."
