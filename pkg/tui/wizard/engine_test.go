@@ -1,9 +1,11 @@
 package wizard
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
@@ -1820,5 +1822,131 @@ func TestEngine_SkippedDepWithFixedController_ErrorsNotLoops(t *testing.T) {
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
 		t.Fatal("expected error, not infinite loop")
+	}
+}
+
+// --- Progress bar tests ---
+
+func TestEngine_ProgressBarCountsOnlyVisibleSteps(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:   "a",
+				Prompt: TextInputPrompt,
+				Setter: func(v any) {},
+			},
+			{
+				Name:   "b",
+				Prompt: TextInputPrompt,
+				IsSet:  func() bool { return true },
+				Value:  func() any { return "preset" },
+				Setter: func(v any) {},
+			},
+			{
+				Name:       "c",
+				Prompt:     TextInputPrompt,
+				ShouldSkip: func(_ map[string]any) bool { return true },
+				Setter:     func(v any) {},
+			},
+			{
+				Name:   "d",
+				Prompt: TextInputPrompt,
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	p := tuitesting.New().AddTextInput("val-a").AddTextInput("val-d")
+	var buf bytes.Buffer
+	engine := NewEngine(p, WithOutput(&buf))
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Step 1 of 2") {
+		t.Errorf("expected 'Step 1 of 2' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Step 2 of 2") {
+		t.Errorf("expected 'Step 2 of 2' in output, got:\n%s", output)
+	}
+}
+
+func TestEngine_ProgressBarWithBackNavigation(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:   "a",
+				Prompt: SelectPrompt,
+				Loader: StaticChoices(
+					Choice{Label: "X", Value: "x"},
+					Choice{Label: "Y", Value: "y"},
+				),
+				Setter: func(v any) {},
+			},
+			{
+				Name:   "b",
+				Prompt: SelectPrompt,
+				Loader: StaticChoices(
+					Choice{Label: "M", Value: "m"},
+					Choice{Label: "N", Value: "n"},
+				),
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	p := tuitesting.New().
+		AddSelect(0). // step a: select X
+		AddSelect(2). // step b: select "← Back"
+		AddSelect(1). // step a again: select Y
+		AddSelect(0)  // step b: select M
+	var buf bytes.Buffer
+	engine := NewEngine(p, WithOutput(&buf))
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	count1 := strings.Count(output, "Step 1 of 2")
+	count2 := strings.Count(output, "Step 2 of 2")
+	if count1 != 2 {
+		t.Errorf("expected 'Step 1 of 2' to appear 2 times, got %d\noutput:\n%s", count1, output)
+	}
+	if count2 != 2 {
+		t.Errorf("expected 'Step 2 of 2' to appear 2 times, got %d\noutput:\n%s", count2, output)
+	}
+}
+
+func TestEngine_SingleStepNoProgressBar(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:   "only",
+				Prompt: TextInputPrompt,
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	p := tuitesting.New().AddTextInput("hello")
+	var buf bytes.Buffer
+	engine := NewEngine(p, WithOutput(&buf))
+
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if strings.Contains(output, "Step") {
+		t.Errorf("single-step flow should have no progress bar, got:\n%s", output)
 	}
 }

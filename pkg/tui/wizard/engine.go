@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -194,6 +197,8 @@ func (e *Engine) handleEmptyChoices(step Step) (bool, error) {
 
 // handlePrompt prompts the user and processes the result.
 func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) error {
+	e.renderProgress()
+
 	canGoBack := e.hasEditablePriorStep()
 	value, err := e.prompt(ctx, step, choices, canGoBack)
 
@@ -537,6 +542,77 @@ func (e *Engine) promptConfirm(ctx context.Context, step Step) (any, error) {
 		}
 	}
 	return e.prompter.Confirm(ctx, promptLabel(step), opts...)
+}
+
+// --- Progress ---
+
+// countVisibleSteps returns the number of steps that will be prompted
+// (not fixed, not skipped, not auto-skipped).
+func (e *Engine) countVisibleSteps() int {
+	col := e.buildCollected()
+	count := 0
+	for i, step := range e.flow.Steps {
+		if step.IsSet != nil && step.IsSet() {
+			continue
+		}
+		if step.ShouldSkip != nil && step.ShouldSkip(col) {
+			continue
+		}
+		if e.steps[i].state == stateAutoSkipped {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// currentVisibleStep returns the 1-based position of the current step
+// among visible steps.
+func (e *Engine) currentVisibleStep() int {
+	col := e.buildCollected()
+	pos := 0
+	for i, step := range e.flow.Steps {
+		if step.IsSet != nil && step.IsSet() {
+			continue
+		}
+		if step.ShouldSkip != nil && step.ShouldSkip(col) {
+			continue
+		}
+		if e.steps[i].state == stateAutoSkipped {
+			continue
+		}
+		pos++
+		if i == e.current {
+			return pos
+		}
+	}
+	return pos
+}
+
+// renderProgress prints a progress bar above the next prompt.
+//
+//	━━━━━━━━━━━━━━━━░░░░░░░░░░░░  Step 4 of 12
+func (e *Engine) renderProgress() {
+	total := e.countVisibleSteps()
+	if total <= 1 {
+		return
+	}
+	current := e.currentVisibleStep()
+
+	const barWidth = 30
+	filled := barWidth * current / total
+	unfilled := barWidth - filled
+
+	filledStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+	unfilledStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	bar := filledStyle.Render(strings.Repeat("━", filled)) +
+		unfilledStyle.Render(strings.Repeat("░", unfilled))
+
+	label := fmt.Sprintf("  Step %d of %d", current, total)
+	dimLabel := unfilledStyle.Render(label)
+
+	_, _ = fmt.Fprintf(e.out(), "\n%s%s\n", bar, dimLabel)
 }
 
 // --- Utilities ---
