@@ -60,11 +60,60 @@ var (
 // activeTheme is the current theme. Defaults to ThemeDefault.
 var activeTheme = ThemeDefault
 
+// activeThemeName tracks which theme is active by name.
+var activeThemeName = "default"
+
+// Themes maps theme names to Theme values.
+// Use this for CLI flag validation or listing available themes.
+var Themes = map[string]Theme{
+	"default":    ThemeDefault,
+	"dracula":    ThemeDracula,
+	"catppuccin": ThemeCatppuccin,
+	"nord":       ThemeNord,
+	"tokyonight": ThemeTokyoNight,
+}
+
 // SetTheme changes the color theme for all TUI prompts.
 // Call this before creating any prompts (typically in main or init).
 func SetTheme(t Theme) {
 	activeTheme = t
+	// Try to resolve the name.
+	activeThemeName = "custom"
+	for name, theme := range Themes {
+		if theme == t {
+			activeThemeName = name
+			break
+		}
+	}
 	applyTheme()
+}
+
+// SetThemeByName sets the theme by name. Returns false if the name is unknown.
+func SetThemeByName(name string) bool {
+	t, ok := Themes[name]
+	if !ok {
+		return false
+	}
+	activeTheme = t
+	activeThemeName = name
+	applyTheme()
+	return true
+}
+
+// GetTheme returns the active theme.
+func GetTheme() Theme {
+	return activeTheme
+}
+
+// GetThemeName returns the name of the active theme
+// (e.g., "default", "dracula", "catppuccin", "nord", "tokyonight", or "custom").
+func GetThemeName() string {
+	return activeThemeName
+}
+
+// ThemeNames returns the names of all built-in themes.
+func ThemeNames() []string {
+	return []string{"default", "dracula", "catppuccin", "nord", "tokyonight"}
 }
 
 // Shared styles derived from the active theme.
