@@ -6,40 +6,8 @@
 
 # ─── Development Setup ──────────────────────────────────────────────
 
-setup: ## Complete development environment setup (installs only what's needed)
-	@echo "→ Setting up development environment..."
-	@echo ""
-	@if ! command -v golangci-lint >/dev/null 2>&1; then \
-		echo "Installing golangci-lint..."; \
-		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; \
-		echo "✓ golangci-lint installed"; \
-	else \
-		echo "✓ golangci-lint already installed ($$(golangci-lint --version))"; \
-	fi
-	@echo ""
-	@if ! command -v goimports >/dev/null 2>&1; then \
-		echo "Installing goimports..."; \
-		go install golang.org/x/tools/cmd/goimports@latest; \
-		echo "✓ goimports installed"; \
-	else \
-		echo "✓ goimports already installed"; \
-	fi
-	@echo ""
-	@if command -v pre-commit >/dev/null 2>&1; then \
-		if [ ! -f .git/hooks/pre-commit ]; then \
-			echo "Installing pre-commit hooks..."; \
-			pre-commit install >/dev/null 2>&1; \
-			pre-commit install --hook-type commit-msg >/dev/null 2>&1; \
-			echo "✓ Pre-commit hooks installed"; \
-		else \
-			echo "✓ Pre-commit hooks already installed"; \
-		fi; \
-	else \
-		echo "⚠ pre-commit not found (optional)"; \
-		echo "  Install: brew install pre-commit (macOS) or pip install pre-commit"; \
-	fi
-	@echo ""
-	@echo "✓ Development environment ready!"
+setup: ## Set up development environment (tools + hooks)
+	@./scripts/setup.sh
 
 # ─── Build & Test ────────────────────────────────────────────────────
 
