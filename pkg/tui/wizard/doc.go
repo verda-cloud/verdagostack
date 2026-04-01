@@ -175,18 +175,52 @@
 //
 // Default layout (when Flow.Layout is nil):
 //
-//	┌──────────────────────────────────────┐
-//	│ ━━━━━━━━━━━━━━░░░░░░  Step 3 of 10  │  ← ProgressRegion
-//	│ ? Select instance type               │  ← Prompt (engine's sequential loop)
-//	│   > Standard-2vCPU-8GB               │
-//	│     Standard-4vCPU-16GB              │
-//	└──────────────────────────────────────┘
+//	┌─────────────────────────────────────────────┐
+//	│ ████████████████░░░░░░░░░░  Step 3 of 10   │  ← ProgressRegion (gradient bar)
+//	│ ? Select instance type                      │  ← Prompt (engine's sequential loop)
+//	│   > Standard-2vCPU-8GB                      │
+//	│     Standard-4vCPU-16GB                     │
+//	└─────────────────────────────────────────────┘
+//
+// # Progress Bar
+//
+// The built-in [ProgressRegion] uses the charmbracelet/bubbles progress
+// component, rendering a smooth gradient-colored bar (same style as the
+// bubbletea progress examples). It is hidden for single-step flows.
+//
+// Default (bubbles default gradient #5A56E0 → #EE6FF8):
+//
+//	wizard.NewProgressRegion()
+//
+// Custom gradient to match your theme:
+//
+//	// Dracula theme
+//	wizard.NewProgressRegion(
+//	    wizard.WithProgressGradient("#bd93f9", "#ff79c6"),
+//	)
+//
+// Solid fill instead of gradient:
+//
+//	wizard.NewProgressRegion(
+//	    wizard.WithProgressSolidFill("#50fa7b"),
+//	)
+//
+// Custom width (default is 40 characters):
+//
+//	wizard.NewProgressRegion(
+//	    wizard.WithProgressWidth(30),
+//	    wizard.WithProgressGradient("#88c0d0", "#5e81ac"),
+//	)
+//
+// # Custom Layout
 //
 // Custom layout with additional regions:
 //
 //	flow := &wizard.Flow{
 //	    Layout: []wizard.RegionDef{
-//	        {ID: "progress", Region: wizard.NewProgressRegion()},
+//	        {ID: "progress", Region: wizard.NewProgressRegion(
+//	            wizard.WithProgressGradient("#bd93f9", "#ff79c6"),
+//	        )},
 //	        // Custom cost region that updates when collected values change.
 //	        {ID: "cost", Region: &CostRegion{}},
 //	    },
