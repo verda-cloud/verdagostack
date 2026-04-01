@@ -198,9 +198,12 @@ func (e *Engine) handleEmptyChoices(step Step) (bool, error) {
 // handlePrompt prompts the user and processes the result.
 func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) error {
 	// Broadcast step change to all regions and render.
+	// Use absolute position (e.current+1 of len(Steps)) so the bar is
+	// stable — it always increments and the total never changes, even
+	// when steps are skipped or fixed.
 	e.bus.Broadcast(StepChangedMsg{
-		Current:   e.currentVisibleStep(),
-		Total:     e.countVisibleSteps(),
+		Current:   e.current + 1,
+		Total:     len(e.flow.Steps),
 		StepName:  step.Name,
 		Collected: e.store.Collected(),
 	})
@@ -565,50 +568,7 @@ func (e *Engine) promptConfirm(ctx context.Context, step Step) (any, error) {
 	return e.prompter.Confirm(ctx, promptLabel(step), opts...)
 }
 
-// --- Progress ---
-
-// countVisibleSteps returns the number of steps that will be prompted
-// (not fixed, not skipped, not auto-skipped).
-func (e *Engine) countVisibleSteps() int {
-	col := e.store.Collected()
-	count := 0
-	for i, step := range e.flow.Steps {
-		if step.IsSet != nil && step.IsSet() {
-			continue
-		}
-		if step.ShouldSkip != nil && step.ShouldSkip(col) {
-			continue
-		}
-		if e.steps[i].state == stateAutoSkipped {
-			continue
-		}
-		count++
-	}
-	return count
-}
-
-// currentVisibleStep returns the 1-based position of the current step
-// among visible steps.
-func (e *Engine) currentVisibleStep() int {
-	col := e.store.Collected()
-	pos := 0
-	for i, step := range e.flow.Steps {
-		if step.IsSet != nil && step.IsSet() {
-			continue
-		}
-		if step.ShouldSkip != nil && step.ShouldSkip(col) {
-			continue
-		}
-		if e.steps[i].state == stateAutoSkipped {
-			continue
-		}
-		pos++
-		if i == e.current {
-			return pos
-		}
-	}
-	return pos
-}
+// --- Rendering ---
 
 // renderRegions outputs all region renders to the writer.
 func (e *Engine) renderRegions() {

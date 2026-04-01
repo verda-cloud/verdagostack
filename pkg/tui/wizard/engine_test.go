@@ -1875,11 +1875,13 @@ func TestEngine_ProgressBarCountsOnlyVisibleSteps(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "Step 1 of 2") {
-		t.Errorf("expected 'Step 1 of 2' in output, got:\n%s", output)
+	// Absolute position: step "a" is 1 of 4, step "d" is 4 of 4
+	// (b=fixed and c=skipped are not prompted but still counted in total)
+	if !strings.Contains(output, "Step 1 of 4") {
+		t.Errorf("expected 'Step 1 of 4' in output, got:\n%s", output)
 	}
-	if !strings.Contains(output, "Step 2 of 2") {
-		t.Errorf("expected 'Step 2 of 2' in output, got:\n%s", output)
+	if !strings.Contains(output, "Step 4 of 4") {
+		t.Errorf("expected 'Step 4 of 4' in output, got:\n%s", output)
 	}
 }
 
