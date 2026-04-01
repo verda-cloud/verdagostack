@@ -89,6 +89,7 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	e.current = 0
 	e.flow = flow
 	e.steps = make([]stepRuntime, len(flow.Steps))
+	e.store.Reset()
 
 	// Initialize message bus with layout regions (or default).
 	e.bus = NewMessageBus()
@@ -98,6 +99,11 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	}
 	for _, def := range layout {
 		e.bus.Register(def.ID, def.Region)
+	}
+
+	// Wire store change notifications to the message bus.
+	e.store.onChange = func(key string, value any) {
+		e.bus.Broadcast(StoreChangedMsg{Key: key, Value: value})
 	}
 
 	for e.current < len(flow.Steps) {

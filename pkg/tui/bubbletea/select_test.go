@@ -304,6 +304,26 @@ func TestSelectModel_NavigationWrapsInFilteredList(t *testing.T) {
 	}
 }
 
+func TestSelectModel_BackspaceUnicode(t *testing.T) {
+	choices := []string{"東京タワー", "大阪城", "富士山"}
+	m := newSelectModel("Pick", choices, tui.SelectConfig{PageSize: 10, Loop: true})
+
+	// Type "東京" (2 runes, 6 bytes each)
+	m = sendRune(m, '東')
+	m = sendRune(m, '京')
+
+	if m.filter != "東京" {
+		t.Fatalf("filter = %q, want '東京'", m.filter)
+	}
+
+	// Backspace should remove one rune (京), not one byte
+	m = sendKey(m, tea.KeyMsg{Type: tea.KeyBackspace})
+
+	if m.filter != "東" {
+		t.Errorf("filter = %q after backspace, want '東'", m.filter)
+	}
+}
+
 func TestSelectModel_BackspaceOnEmptyFilterIsNoop(t *testing.T) {
 	choices := []string{"Apple", "Banana"}
 	m := newSelectModel("Pick", choices, tui.SelectConfig{PageSize: 10, Loop: true})

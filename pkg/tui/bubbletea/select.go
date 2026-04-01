@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -115,7 +116,8 @@ func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case tea.KeyBackspace:
 			if len(m.filter) > 0 {
-				m.filter = m.filter[:len(m.filter)-1]
+				_, size := utf8.DecodeLastRuneInString(m.filter)
+				m.filter = m.filter[:len(m.filter)-size]
 				m.refilter()
 			}
 		case tea.KeyRunes:

@@ -63,3 +63,40 @@ func TestStore_Clear(t *testing.T) {
 		t.Error("store data should be unaffected by ClearCollected")
 	}
 }
+
+func TestStore_Reset(t *testing.T) {
+	s := NewStore()
+	s.SetCollected("a", "1")
+	s.Set("cost", 5.0)
+
+	s.Reset()
+
+	col := s.Collected()
+	if len(col) != 0 {
+		t.Errorf("expected empty collected after reset, got %v", col)
+	}
+	_, ok := s.Get("cost")
+	if ok {
+		t.Error("expected empty data after reset")
+	}
+}
+
+func TestStore_SetNotifiesCallback(t *testing.T) {
+	s := NewStore()
+
+	var gotKey string
+	var gotValue any
+	s.onChange = func(key string, value any) {
+		gotKey = key
+		gotValue = value
+	}
+
+	s.Set("cost", 3.50)
+
+	if gotKey != "cost" {
+		t.Errorf("expected callback key 'cost', got %q", gotKey)
+	}
+	if gotValue != 3.50 {
+		t.Errorf("expected callback value 3.50, got %v", gotValue)
+	}
+}

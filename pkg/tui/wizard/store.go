@@ -11,6 +11,7 @@ type Store struct {
 	collected map[string]any
 	data      map[string]any
 	mu        sync.RWMutex
+	onChange  func(key string, value any) // optional callback when Set is called
 }
 
 // NewStore creates an empty store.
@@ -19,6 +20,14 @@ func NewStore() *Store {
 		collected: make(map[string]any),
 		data:      make(map[string]any),
 	}
+}
+
+// Reset clears all collected and arbitrary data.
+func (s *Store) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.collected = make(map[string]any)
+	s.data = make(map[string]any)
 }
 
 // Collected returns a snapshot of the wizard step values.
@@ -53,8 +62,14 @@ func (s *Store) Get(key string) (any, bool) {
 }
 
 // Set writes an arbitrary value to the store.
+// If the engine has wired up a change callback (via the message bus),
+// it broadcasts a StoreChangedMsg to all regions.
 func (s *Store) Set(key string, value any) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.data[key] = value
+	cb := s.onChange
+	s.mu.Unlock()
+	if cb != nil {
+		cb(key, value)
+	}
 }
