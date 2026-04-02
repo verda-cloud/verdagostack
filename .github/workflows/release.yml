@@ -42,15 +42,18 @@ jobs:
       - name: Run make release
         run: make release VERSION=${{ github.event.inputs.version }}
 
-      - name: Commit and tag
+      - name: Commit, tag, and push release branch
         run: |
+          VERSION="${{ github.event.inputs.version }}"
+          BRANCH="release/${VERSION}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }}
+          git checkout -b "${BRANCH}"
           git add -A
-          git commit -m "chore(release): ${{ github.event.inputs.version }}"
-          git tag ${{ github.event.inputs.version }}
-          git push origin main --tags
+          git commit -m "chore(release): ${VERSION}"
+          git tag "${VERSION}"
+          git push origin "${BRANCH}" --tags
 
       - name: Extract changelog for release
         id: changelog
@@ -66,8 +69,19 @@ jobs:
 
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           gh release create ${{ github.event.inputs.version }} \
             --title "${{ github.event.inputs.version }}" \
             --notes-file /tmp/release-notes.md
+
+      - name: Create PR to merge release into main
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          gh pr create \
+            --base main \
+            --head "release/${VERSION}" \
+            --title "chore(release): ${VERSION}" \
+            --body "Automated release PR for ${VERSION}. Merges changelog and version updates into main."
