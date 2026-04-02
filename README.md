@@ -33,6 +33,9 @@ go get github.com/verda-cloud/verdagostack/pkg/log
 | [pkg/util/reflect](pkg/util/reflect/) | Struct field inspection, selective field copy, YAML-based deep copy |
 | [pkg/util/retry](pkg/util/retry/) | Exponential backoff, polling, and periodic execution (stdlib only) |
 | [pkg/util/stringsx](pkg/util/stringsx/) | String slice utilities — Diff, Unique, Contains, Filter, Reverse, base64 |
+| [pkg/tui](pkg/tui/) | Interactive TUI framework — Prompter, Status (spinners, progress, tables, pager) |
+| [pkg/tui/bubbletea](pkg/tui/bubbletea/) | Bubble Tea v2 backend — select, multiselect, text input, confirm, password, editor, 8 themes |
+| [pkg/tui/wizard](pkg/tui/wizard/) | Multi-step wizard engine — flows, steps, Store, MessageBus, ProgressView, HintBarView |
 | [pkg/version](pkg/version/) | Build-time version info via `-ldflags` with `--version` flag support |
 
 ## Building Apps with verdagostack
@@ -76,6 +79,83 @@ Once installed, just ask your AI assistant in your app project:
 - *"Build a CLI tool for managing deployments"* — triggers the CLI-app skill
 
 See [goapp-demo](https://github.com/verda-cloud/goapp-demo) for a complete working example built with these patterns.
+
+## TUI quick start
+
+The `pkg/tui` package provides interactive terminal prompts, spinners, and a multi-step wizard engine built on [Bubble Tea v2](https://github.com/charmbracelet/bubbletea).
+
+```bash
+go get github.com/verda-cloud/verdagostack/pkg/tui
+```
+
+### Prompts
+
+```go
+import (
+    "github.com/verda-cloud/verdagostack/pkg/tui"
+    _ "github.com/verda-cloud/verdagostack/pkg/tui/bubbletea" // register backend
+)
+
+prompter := tui.Default()
+
+// Select with type-to-filter
+idx, _ := prompter.Select(ctx, "Pick a color", []string{"Red", "Green", "Blue"})
+
+// MultiSelect
+indices, _ := prompter.MultiSelect(ctx, "Toppings", []string{"Cheese", "Pepperoni", "Mushrooms"})
+
+// Text input, confirm, password, editor
+name, _ := prompter.TextInput(ctx, "Name", tui.WithDefault("world"))
+ok, _ := prompter.Confirm(ctx, "Continue?")
+```
+
+### Themes
+
+8 built-in themes (5 dark, 3 light):
+
+| Theme | Background |
+|-------|-----------|
+| `default` | Dark (ANSI) |
+| `dracula` | Dark |
+| `catppuccin` | Dark |
+| `nord` | Dark |
+| `tokyonight` | Dark |
+| `github-light` | Light |
+| `catppuccin-latte` | Light |
+| `solarized-light` | Light |
+
+```go
+import "github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
+
+bubbletea.SetThemeByName("dracula")      // set by name
+name := bubbletea.GetThemeName()          // get current
+names := bubbletea.ThemeNames()           // list all
+```
+
+### Wizard engine
+
+Build multi-step interactive flows with progress bar and contextual hint bar:
+
+```go
+import "github.com/verda-cloud/verdagostack/pkg/tui/wizard"
+
+flow := &wizard.Flow{
+    Name: "setup",
+    Layout: []wizard.ViewDef{
+        {ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
+        {ID: "hints", View: wizard.NewHintBarView()},
+    },
+    Steps: []wizard.Step{
+        {Name: "name", Prompt: wizard.TextInputPrompt, Required: true, ...},
+        {Name: "type", Prompt: wizard.SelectPrompt, Loader: wizard.StaticChoices(...), ...},
+    },
+}
+
+engine := wizard.NewEngine(prompter, status, wizard.WithOutput(os.Stderr))
+engine.Run(ctx, flow)
+```
+
+Features: back navigation, dependency-aware step loading, choice caching, Store + MessageBus for views.
 
 ## Options & Database quick start
 
