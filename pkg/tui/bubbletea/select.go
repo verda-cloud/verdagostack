@@ -152,8 +152,6 @@ func (m selectModel) View() tea.View {
 	fmt.Fprintf(&b, "%s %s", promptStyle.Render("?"), titleStyle.Render(m.prompt))
 	if m.filter != "" {
 		fmt.Fprintf(&b, " %s", answerStyle.Render(m.filter))
-	} else {
-		fmt.Fprintf(&b, " %s", hintStyle.Render("(type to filter, enter to select)"))
 	}
 	b.WriteString("\n")
 
@@ -171,6 +169,7 @@ func (m selectModel) View() tea.View {
 			fmt.Fprintf(&b, "    %s\n", dimStyle.Render(label))
 		}
 	}
+	fmt.Fprintf(&b, "\n  %s\n", hintStyle.Render("↑/↓ navigate · type to filter · enter select · esc cancel"))
 	return tea.NewView(b.String())
 }
 

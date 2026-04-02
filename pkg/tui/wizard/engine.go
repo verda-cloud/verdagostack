@@ -208,10 +208,11 @@ func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) 
 	// stable — it always increments and the total never changes, even
 	// when steps are skipped or fixed.
 	e.bus.Broadcast(StepChangedMsg{
-		Current:   e.current + 1,
-		Total:     len(e.flow.Steps),
-		StepName:  step.Name,
-		Collected: e.store.Collected(),
+		Current:    e.current + 1,
+		Total:      len(e.flow.Steps),
+		StepName:   step.Name,
+		PromptType: step.Prompt,
+		Collected:  e.store.Collected(),
 	})
 	e.renderViews()
 

@@ -102,7 +102,7 @@ func (m multiSelectModel) View() tea.View {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s %s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt), hintStyle.Render("(space to toggle, enter to confirm)"))
+	fmt.Fprintf(&b, "%s %s\n", promptStyle.Render("?"), titleStyle.Render(m.prompt))
 
 	start, end := m.visibleRange()
 	for i := start; i < end; i++ {
@@ -125,6 +125,7 @@ func (m multiSelectModel) View() tea.View {
 	if m.err != "" {
 		fmt.Fprintf(&b, "  %s\n", errorStyle.Render("✗ "+m.err))
 	}
+	fmt.Fprintf(&b, "\n  %s\n", hintStyle.Render("↑/↓ navigate · space toggle · enter confirm · esc cancel"))
 	return tea.NewView(b.String())
 }
 
