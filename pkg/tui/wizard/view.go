@@ -26,10 +26,11 @@ type ViewDef struct {
 
 // StepChangedMsg is broadcast when the engine moves to a new step.
 type StepChangedMsg struct {
-	Current   int
-	Total     int
-	StepName  string
-	Collected map[string]any
+	Current    int
+	Total      int
+	StepName   string
+	PromptType PromptType
+	Collected  map[string]any
 }
 
 // CollectedChangedMsg is broadcast when a step completes and collected values change.

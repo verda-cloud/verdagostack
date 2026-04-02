@@ -169,6 +169,7 @@ func (m selectModel) View() tea.View {
 			fmt.Fprintf(&b, "    %s\n", dimStyle.Render(label))
 		}
 	}
+	fmt.Fprintf(&b, "\n  %s\n", hintStyle.Render("↑/↓ navigate · type to filter · enter select · esc cancel"))
 	return tea.NewView(b.String())
 }
 
