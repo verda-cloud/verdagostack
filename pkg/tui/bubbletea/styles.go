@@ -11,7 +11,9 @@ type Theme struct {
 	Accent  color.Color // cursor, selected items, final answers
 	Success color.Color // prompt "?", checkmarks
 	Error   color.Color // validation errors
-	Dim     color.Color // unselected items, hints
+	Dim     color.Color // unselected items
+	Hint    color.Color // keyboard hints (brighter than Dim)
+	NoColor bool        // when true, use bold/faint/reverse instead of ANSI colors
 }
 
 // Built-in themes.
@@ -22,6 +24,7 @@ var (
 		Success: lipgloss.Color("10"), // green
 		Error:   lipgloss.Color("9"),  // red
 		Dim:     lipgloss.Color("8"),  // gray
+		Hint:    lipgloss.Color("7"),  // light gray
 	}
 
 	// ThemeDracula uses the Dracula color palette.
@@ -30,6 +33,7 @@ var (
 		Success: lipgloss.Color("#50fa7b"), // green
 		Error:   lipgloss.Color("#ff5555"), // red
 		Dim:     lipgloss.Color("#6272a4"), // comment
+		Hint:    lipgloss.Color("#8592b8"), // brighter comment
 	}
 
 	// ThemeCatppuccin uses the Catppuccin Mocha palette.
@@ -38,6 +42,7 @@ var (
 		Success: lipgloss.Color("#a6e3a1"), // green
 		Error:   lipgloss.Color("#f38ba8"), // red
 		Dim:     lipgloss.Color("#6c7086"), // overlay0
+		Hint:    lipgloss.Color("#9399b2"), // overlay2
 	}
 
 	// ThemeNord uses the Nord color palette.
@@ -46,6 +51,7 @@ var (
 		Success: lipgloss.Color("#a3be8c"), // green
 		Error:   lipgloss.Color("#bf616a"), // red
 		Dim:     lipgloss.Color("#4c566a"), // polar night
+		Hint:    lipgloss.Color("#616e88"), // brighter polar night
 	}
 
 	// ThemeTokyoNight uses the Tokyo Night palette.
@@ -54,6 +60,7 @@ var (
 		Success: lipgloss.Color("#9ece6a"), // green
 		Error:   lipgloss.Color("#f7768e"), // red
 		Dim:     lipgloss.Color("#565f89"), // comment
+		Hint:    lipgloss.Color("#737aa2"), // brighter comment
 	}
 
 	// ThemeGitHubLight is a light theme based on the GitHub Light palette.
@@ -62,6 +69,7 @@ var (
 		Success: lipgloss.Color("#1a7f37"), // green
 		Error:   lipgloss.Color("#cf222e"), // red
 		Dim:     lipgloss.Color("#656d76"), // gray
+		Hint:    lipgloss.Color("#57606a"), // darker gray
 	}
 
 	// ThemeCatppuccinLatte is the light variant of the Catppuccin palette.
@@ -70,6 +78,7 @@ var (
 		Success: lipgloss.Color("#40a02b"), // green
 		Error:   lipgloss.Color("#d20f39"), // red
 		Dim:     lipgloss.Color("#9ca0b0"), // overlay0
+		Hint:    lipgloss.Color("#7c7f93"), // overlay1
 	}
 
 	// ThemeSolarizedLight uses the Solarized Light palette.
@@ -78,7 +87,16 @@ var (
 		Success: lipgloss.Color("#859900"), // green
 		Error:   lipgloss.Color("#dc322f"), // red
 		Dim:     lipgloss.Color("#93a1a1"), // base1
+		Hint:    lipgloss.Color("#657b83"), // base00
 	}
+
+	// ThemeMonoDark is a color-free theme for dark-background terminals.
+	// Uses only bold, faint, and reverse attributes — no ANSI colors.
+	ThemeMonoDark = Theme{NoColor: true}
+
+	// ThemeMonoLight is a color-free theme for light-background terminals.
+	// Uses only bold, faint, and reverse attributes — no ANSI colors.
+	ThemeMonoLight = Theme{NoColor: true}
 )
 
 // activeTheme is the current theme. Defaults to ThemeDefault.
@@ -98,6 +116,8 @@ var Themes = map[string]Theme{
 	"github-light":     ThemeGitHubLight,
 	"catppuccin-latte": ThemeCatppuccinLatte,
 	"solarized-light":  ThemeSolarizedLight,
+	"mono-dark":        ThemeMonoDark,
+	"mono-light":       ThemeMonoLight,
 }
 
 // SetTheme changes the color theme for all TUI prompts.
@@ -132,6 +152,12 @@ func GetTheme() Theme {
 	return activeTheme
 }
 
+// HintStyle returns the resolved hint lipgloss.Style for the active theme.
+// Use this with wizard.WithHintStyle to pass the correct style to HintBarView.
+func HintStyle() lipgloss.Style {
+	return hintStyle
+}
+
 // GetThemeName returns the name of the active theme
 // (e.g., "default", "dracula", "catppuccin", "nord", "tokyonight", or "custom").
 func GetThemeName() string {
@@ -140,7 +166,7 @@ func GetThemeName() string {
 
 // ThemeNames returns the names of all built-in themes.
 func ThemeNames() []string {
-	return []string{"default", "dracula", "catppuccin", "catppuccin-latte", "nord", "tokyonight", "github-light", "solarized-light"}
+	return []string{"default", "dracula", "catppuccin", "catppuccin-latte", "nord", "tokyonight", "github-light", "solarized-light", "mono-dark", "mono-light"}
 }
 
 // Shared styles derived from the active theme.
@@ -163,6 +189,12 @@ func init() {
 
 func applyTheme() {
 	t := activeTheme
+
+	if t.NoColor {
+		applyNoColorTheme()
+		return
+	}
+
 	promptStyle = lipgloss.NewStyle().Foreground(t.Success).Bold(true)
 	titleStyle = lipgloss.NewStyle().Bold(true)
 	answerStyle = lipgloss.NewStyle().Foreground(t.Accent)
@@ -172,5 +204,33 @@ func applyTheme() {
 	checkStyle = lipgloss.NewStyle().Foreground(t.Success)
 	uncheckStyle = lipgloss.NewStyle().Foreground(t.Dim)
 	errorStyle = lipgloss.NewStyle().Foreground(t.Error)
-	hintStyle = lipgloss.NewStyle().Foreground(t.Dim)
+	hintStyle = lipgloss.NewStyle().Foreground(t.Hint)
+}
+
+// applyNoColorTheme sets styles using only bold, faint, reverse, and
+// underline — no ANSI color codes. Works on monochrome terminals and
+// when TERM=dumb or NO_COLOR is set.
+func applyNoColorTheme() {
+	reverse := activeThemeName == "mono-light"
+
+	promptStyle = lipgloss.NewStyle().Bold(true)
+	titleStyle = lipgloss.NewStyle().Bold(true)
+	dimStyle = lipgloss.NewStyle().Faint(true)
+	hintStyle = lipgloss.NewStyle().Faint(true)
+	uncheckStyle = lipgloss.NewStyle().Faint(true)
+	errorStyle = lipgloss.NewStyle().Bold(true).Underline(true)
+
+	if reverse {
+		// Light background: reverse for accent, bold for answers.
+		answerStyle = lipgloss.NewStyle().Reverse(true)
+		cursorStyle = lipgloss.NewStyle().Reverse(true)
+		selectedStyle = lipgloss.NewStyle().Reverse(true)
+		checkStyle = lipgloss.NewStyle().Reverse(true)
+	} else {
+		// Dark background: bold for accent, underline for answers.
+		answerStyle = lipgloss.NewStyle().Bold(true)
+		cursorStyle = lipgloss.NewStyle().Bold(true)
+		selectedStyle = lipgloss.NewStyle().Bold(true)
+		checkStyle = lipgloss.NewStyle().Bold(true)
+	}
 }

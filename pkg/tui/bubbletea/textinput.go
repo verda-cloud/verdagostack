@@ -67,6 +67,7 @@ func (m textInputModel) View() tea.View {
 	if m.err != nil {
 		s += fmt.Sprintf("\n  %s", errorStyle.Render("✗ "+m.err.Error()))
 	}
+	s += fmt.Sprintf("\n\n  %s", hintStyle.Render("enter submit · esc cancel"))
 	return tea.NewView(s)
 }
 

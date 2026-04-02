@@ -1,6 +1,7 @@
 package wizard
 
 import (
+	"image/color"
 	"reflect"
 	"strings"
 
@@ -16,13 +17,37 @@ type HintBarView struct {
 	sepStyle   lipgloss.Style
 }
 
-// NewHintBarView creates a HintBarView.
-func NewHintBarView() *HintBarView {
-	return &HintBarView{
-		promptType: -1, // no step yet
-		style:      lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-		sepStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
+// HintBarOption configures the HintBarView.
+type HintBarOption func(*HintBarView)
+
+// WithHintColor sets the foreground color for hint text and separators.
+func WithHintColor(c color.Color) HintBarOption {
+	return func(v *HintBarView) {
+		v.style = lipgloss.NewStyle().Foreground(c)
+		v.sepStyle = lipgloss.NewStyle().Foreground(c)
 	}
+}
+
+// WithHintStyle sets the full style for hint text and separators.
+// Use this for no-color themes where Faint/Bold is needed instead of colors.
+func WithHintStyle(s lipgloss.Style) HintBarOption {
+	return func(v *HintBarView) {
+		v.style = s
+		v.sepStyle = s
+	}
+}
+
+// NewHintBarView creates a HintBarView.
+func NewHintBarView(opts ...HintBarOption) *HintBarView {
+	v := &HintBarView{
+		promptType: -1, // no step yet
+		style:      lipgloss.NewStyle().Foreground(lipgloss.Color("7")),
+		sepStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("7")),
+	}
+	for _, opt := range opts {
+		opt(v)
+	}
+	return v
 }
 
 // Update handles StepChangedMsg to update the hint based on PromptType.
