@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -127,6 +128,16 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 
 		choices, err := e.loadChoices(ctx, step)
 		if err != nil {
+			// Treat context.Canceled from a Loader as a back signal,
+			// so Esc in Loader-managed prompts navigates back instead
+			// of terminating the wizard.
+			if errors.Is(err, context.Canceled) && ctx.Err() == nil {
+				if e.hasEditablePriorStep() {
+					e.rewindOne()
+					continue
+				}
+				return fmt.Errorf("wizard cancelled")
+			}
 			return fmt.Errorf("step %q: %w", step.Name, err)
 		}
 
@@ -402,7 +413,8 @@ func (e *Engine) rewindToDependency(current Step) error {
 func (e *Engine) isEditable(idx int) bool {
 	step := e.flow.Steps[idx]
 	rt := e.steps[idx]
-	if step.IsSet != nil && step.IsSet() {
+	// Steps pre-set via flags are not editable.
+	if rt.state == stateFixed {
 		return false
 	}
 	col := e.store.Collected()
@@ -450,12 +462,9 @@ func (e *Engine) loadChoices(ctx context.Context, step Step) ([]Choice, error) {
 func (e *Engine) invalidateDownstream(changedIdx int) {
 	changedName := e.flow.Steps[changedIdx].Name
 	for i, step := range e.flow.Steps {
-		for _, dep := range step.DependsOn {
-			if dep == changedName {
-				e.steps[i].choices = nil
-				e.steps[i].loaded = false
-				break
-			}
+		if slices.Contains(step.DependsOn, changedName) {
+			e.steps[i].choices = nil
+			e.steps[i].loaded = false
 		}
 	}
 }

@@ -204,7 +204,7 @@ func applyTheme() {
 	checkStyle = lipgloss.NewStyle().Foreground(t.Success)
 	uncheckStyle = lipgloss.NewStyle().Foreground(t.Dim)
 	errorStyle = lipgloss.NewStyle().Foreground(t.Error)
-	hintStyle = lipgloss.NewStyle().Foreground(t.Hint)
+	hintStyle = lipgloss.NewStyle().Foreground(t.Hint).Bold(true)
 }
 
 // applyNoColorTheme sets styles using only bold, faint, reverse, and
