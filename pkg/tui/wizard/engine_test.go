@@ -2035,6 +2035,203 @@ func TestEngine_LoaderReceivesStatusAndStore(t *testing.T) {
 	}
 }
 
+func TestEngine_LoaderCanceled_GoesBack(t *testing.T) {
+	// When a Loader returns context.Canceled (e.g., user presses Esc in a
+	// Loader-managed sub-prompt), the wizard should navigate back to the
+	// previous editable step instead of aborting.
+	var region, gpu string
+
+	callCount := 0
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "Finland", Value: "FIN-01"},
+					Choice{Label: "Sweden", Value: "SWE-01"},
+				),
+				Setter: func(v any) { region = v.(string) },
+			},
+			{
+				Name:     "gpu",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
+					callCount++
+					if callCount == 1 {
+						// First time: simulate Esc → context.Canceled
+						return nil, context.Canceled
+					}
+					// Second time: return real choices
+					return []Choice{
+						{Label: "H100", Value: "h100"},
+						{Label: "A100", Value: "a100"},
+					}, nil
+				},
+				Setter: func(v any) { gpu = v.(string) },
+			},
+		},
+	}
+
+	// Step 1: select Finland (idx 0)
+	// Step 2: loader returns context.Canceled → back to step 1
+	// Step 1 again: select Sweden (idx 1)
+	// Step 2: loader succeeds, select H100 (idx 0)
+	p := tuitesting.New().
+		AddSelect(0). // region: Finland
+		AddSelect(1). // region (again): Sweden
+		AddSelect(0)  // gpu: H100
+
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if region != "SWE-01" {
+		t.Errorf("expected region 'SWE-01', got %q", region)
+	}
+	if gpu != "h100" {
+		t.Errorf("expected gpu 'h100', got %q", gpu)
+	}
+}
+
+func TestEngine_LoaderCanceled_FirstStep_Aborts(t *testing.T) {
+	// When the Loader on the first (and only editable) step returns
+	// context.Canceled, the wizard should return "wizard cancelled".
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
+					return nil, context.Canceled
+				},
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	engine := NewEngine(tuitesting.New(), nil, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "wizard cancelled") {
+		t.Errorf("expected 'wizard cancelled', got %q", err)
+	}
+}
+
+func TestEngine_LoaderCanceled_AllPriorFixed_Aborts(t *testing.T) {
+	// If all prior steps are fixed (set via IsSet), loader cancel on the
+	// last step should abort with "wizard cancelled".
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "A", Value: "a"}),
+				Setter:   func(v any) {},
+				IsSet:    func() bool { return true },
+				Value:    func() any { return "a" },
+			},
+			{
+				Name:     "gpu",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
+					return nil, context.Canceled
+				},
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	engine := NewEngine(tuitesting.New(), nil, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "wizard cancelled") {
+		t.Errorf("expected 'wizard cancelled', got %q", err)
+	}
+}
+
+func TestEngine_IsEditable_FixedVsIsSet(t *testing.T) {
+	// Verify that stateFixed (from IsSet) makes a step non-editable,
+	// and back navigation skips over it correctly.
+	var region, env, gpu string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "Finland", Value: "FIN-01"},
+					Choice{Label: "Sweden", Value: "SWE-01"},
+				),
+				Setter: func(v any) { region = v.(string) },
+			},
+			{
+				// This step is pre-set via flag — should be skipped and non-editable.
+				Name:     "env",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "Prod", Value: "prod"}),
+				Setter:   func(v any) { env = v.(string) },
+				IsSet:    func() bool { return true },
+				Value:    func() any { return "prod" },
+			},
+			{
+				Name:     "gpu",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "H100", Value: "h100"},
+					Choice{Label: "A100", Value: "a100"},
+				),
+				Setter: func(v any) { gpu = v.(string) },
+			},
+		},
+	}
+
+	// Step 1: select Finland
+	// Step 2: skipped (IsSet)
+	// Step 3: select "← Back" (idx 2, after h100/a100)
+	//   → should skip step 2 (fixed) and land on step 1
+	// Step 1 again: select Sweden
+	// Step 3 again: select A100 (idx 1)
+	p := tuitesting.New().
+		AddSelect(0). // region: Finland
+		AddSelect(2). // gpu: ← Back (skips fixed env, goes to region)
+		AddSelect(1). // region: Sweden
+		AddSelect(1)  // gpu: A100
+
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if region != "SWE-01" {
+		t.Errorf("expected region 'SWE-01', got %q", region)
+	}
+	if env != "prod" {
+		t.Errorf("expected env 'prod', got %q", env)
+	}
+	if gpu != "a100" {
+		t.Errorf("expected gpu 'a100', got %q", gpu)
+	}
+}
+
 func TestEngine_DefaultLayoutWhenNil(t *testing.T) {
 	flow := &Flow{
 		Name: "test",
