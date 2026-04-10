@@ -16,6 +16,7 @@ type textInputModel struct {
 	submitted   bool
 	aborted     bool
 	interrupted bool // true for Ctrl+C (hard cancel), false for Esc (soft cancel)
+	pristine    bool // true until user types first character; typing clears the pre-filled default
 	validate    func(string) error
 	err         error
 }
@@ -29,6 +30,7 @@ func newTextInputModel(prompt string, cfg tui.TextInputConfig) textInputModel {
 	return textInputModel{
 		prompt:    prompt,
 		textInput: ti,
+		pristine:  cfg.Default != "",
 		validate:  cfg.Validate,
 	}
 }
@@ -54,6 +56,16 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case keyEsc:
 			m.aborted = true
 			return m, func() tea.Msg { return GoBackMsg{} }
+		default:
+			// Clear pre-filled default on first keystroke so the user's
+			// input replaces it rather than appending. This mimics the
+			// native "select-all on focus" behavior.
+			if m.pristine {
+				m.pristine = false
+				if msg.Text != "" && msg.Mod == 0 {
+					m.textInput.SetValue("")
+				}
+			}
 		}
 	}
 
