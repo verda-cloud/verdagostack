@@ -53,7 +53,7 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case keyEsc:
 			m.aborted = true
-			return m, tea.Quit
+			return m, func() tea.Msg { return GoBackMsg{} }
 		}
 	}
 
@@ -61,6 +61,21 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.textInput, cmd = m.textInput.Update(msg)
 	m.err = nil
 	return m, cmd
+}
+
+// Hints returns text input-specific key hints for the hint bar.
+func (m textInputModel) Hints() []string {
+	return []string{"enter submit", "esc back"}
+}
+
+// Result returns the text input value after the user submits.
+func (m textInputModel) Result() (any, bool) {
+	return m.textInput.Value(), m.submitted
+}
+
+// NewTextInputPrompt creates a text input prompt model for use in the wizard composite.
+func NewTextInputPrompt(prompt string, cfg tui.TextInputConfig) PromptModel {
+	return newTextInputModel(prompt, cfg)
 }
 
 func (m textInputModel) View() tea.View {
@@ -71,7 +86,6 @@ func (m textInputModel) View() tea.View {
 	if m.err != nil {
 		s += fmt.Sprintf("\n  %s", errorStyle.Render("✗ "+m.err.Error()))
 	}
-	s += fmt.Sprintf("\n\n  %s", hintStyle.Render("enter submit · esc cancel"))
 	return tea.NewView(s)
 }
 

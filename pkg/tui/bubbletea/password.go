@@ -44,13 +44,28 @@ func (m passwordModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case keyEsc:
 			m.aborted = true
-			return m, tea.Quit
+			return m, func() tea.Msg { return GoBackMsg{} }
 		}
 	}
 
 	var cmd tea.Cmd
 	m.textInput, cmd = m.textInput.Update(msg)
 	return m, cmd
+}
+
+// Hints returns password-specific key hints for the hint bar.
+func (m passwordModel) Hints() []string {
+	return []string{"enter submit", "esc back"}
+}
+
+// Result returns the password value after the user submits.
+func (m passwordModel) Result() (any, bool) {
+	return m.textInput.Value(), m.submitted
+}
+
+// NewPasswordPrompt creates a password prompt model for use in the wizard composite.
+func NewPasswordPrompt(prompt string) PromptModel {
+	return newPasswordModel(prompt)
 }
 
 func (m passwordModel) View() tea.View {

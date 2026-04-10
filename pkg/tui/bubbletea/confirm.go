@@ -46,10 +46,25 @@ func (m confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case keyEsc:
 			m.aborted = true
-			return m, tea.Quit
+			return m, func() tea.Msg { return GoBackMsg{} }
 		}
 	}
 	return m, nil
+}
+
+// Hints returns confirm-specific key hints for the hint bar.
+func (m confirmModel) Hints() []string {
+	return []string{"y/n", "enter confirm", "esc back"}
+}
+
+// Result returns the confirm value after the user decides.
+func (m confirmModel) Result() (any, bool) {
+	return m.value, m.decided
+}
+
+// NewConfirmPrompt creates a confirm prompt model for use in the wizard composite.
+func NewConfirmPrompt(prompt string, cfg tui.ConfirmConfig) PromptModel {
+	return newConfirmModel(prompt, cfg)
 }
 
 func (m confirmModel) View() tea.View {

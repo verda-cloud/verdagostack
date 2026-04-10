@@ -88,10 +88,34 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case keyEsc:
 			m.aborted = true
-			return m, tea.Quit
+			return m, func() tea.Msg { return GoBackMsg{} }
 		}
 	}
 	return m, nil
+}
+
+// Hints returns multiselect-specific key hints for the hint bar.
+func (m multiSelectModel) Hints() []string {
+	return []string{"↑/↓ navigate", "space toggle", "enter confirm", "esc back"}
+}
+
+// Result returns the selected indices after the user confirms.
+func (m multiSelectModel) Result() (any, bool) {
+	if !m.done {
+		return nil, false
+	}
+	var indices []int
+	for i := range m.choices {
+		if m.selected[i] {
+			indices = append(indices, i)
+		}
+	}
+	return indices, true
+}
+
+// NewMultiSelectPrompt creates a multiselect prompt model for use in the wizard composite.
+func NewMultiSelectPrompt(prompt string, choices []string, cfg tui.MultiSelectConfig) PromptModel {
+	return newMultiSelectModel(prompt, choices, cfg)
 }
 
 func (m multiSelectModel) View() tea.View {
@@ -129,7 +153,6 @@ func (m multiSelectModel) View() tea.View {
 	if m.err != "" {
 		fmt.Fprintf(&b, "  %s\n", errorStyle.Render("✗ "+m.err))
 	}
-	fmt.Fprintf(&b, "\n  %s\n", hintStyle.Render("↑/↓ navigate · space toggle · enter confirm · esc cancel"))
 	return tea.NewView(b.String())
 }
 
