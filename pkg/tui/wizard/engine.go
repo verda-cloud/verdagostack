@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"slices"
 
 	tea "charm.land/bubbletea/v2"
@@ -52,7 +53,10 @@ type Engine struct {
 	writer         io.Writer
 	reader         io.Reader
 	keyBindings    []KeyBinding
+	exitConfirm    bool              // when true, Ctrl+C prompts "Exit wizard?" before exiting
 	resultOverride chan promptResult // test-only: bypasses composite model
+	program        *tea.Program      // the running composite program (nil in test mode)
+	resultCh       chan promptResult // channel for receiving prompt results
 }
 
 // EngineOption configures the Engine.
@@ -72,6 +76,53 @@ func WithKeyBindings(bindings ...KeyBinding) EngineOption {
 func WithInput(r io.Reader) EngineOption {
 	return func(e *Engine) { e.reader = r }
 }
+
+// WithExitConfirmation enables a "Exit wizard?" confirmation prompt when the
+// user presses Ctrl+C. Without this option, Ctrl+C exits immediately.
+func WithExitConfirmation() EngineOption {
+	return func(e *Engine) { e.exitConfirm = true }
+}
+
+// TestResult represents a prompt result for testing.
+type TestResult struct {
+	Value  any
+	Action Action
+}
+
+// WithTestResults configures the engine to use pre-built results instead of
+// running the composite tea.Program. This is for external package tests.
+func WithTestResults(results ...TestResult) EngineOption {
+	return func(e *Engine) {
+		ch := make(chan promptResult, len(results))
+		for _, r := range results {
+			ch <- promptResult{value: r.Value, action: r.Action}
+		}
+		close(ch)
+		e.resultOverride = ch
+	}
+}
+
+// Test result constructors for external package tests.
+
+// SelectResult creates a test result for selecting an index.
+func SelectResult(idx int) TestResult { return TestResult{Value: idx, Action: ActionNone} }
+
+// TextResult creates a test result for text input.
+func TextResult(text string) TestResult { return TestResult{Value: text, Action: ActionNone} }
+
+// ConfirmResult creates a test result for a confirm prompt.
+func ConfirmResult(yes bool) TestResult { return TestResult{Value: yes, Action: ActionNone} }
+
+// MultiSelectResult creates a test result for multi-select.
+func MultiSelectResult(indices []int) TestResult {
+	return TestResult{Value: indices, Action: ActionNone}
+}
+
+// BackResult creates a test result for back navigation (Esc).
+func BackResult() TestResult { return TestResult{Action: ActionBack} }
+
+// ExitResult creates a test result for exit (Ctrl+C).
+func ExitResult() TestResult { return TestResult{Action: ActionExit} }
 
 // NewEngine creates a wizard engine with the given prompter and optional status.
 func NewEngine(prompter tui.Prompter, status tui.Status, opts ...EngineOption) *Engine {
@@ -127,11 +178,25 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	}
 
 	// Create result channel and optionally the composite tea.Program.
-	resultCh := e.resultOverride
-	var program *tea.Program
-	if resultCh == nil {
-		resultCh = make(chan promptResult, 1)
-		composite := newCompositeModel(e.keyBindings, e.bus, resultCh)
+	e.resultCh = e.resultOverride
+	e.program = nil
+	if e.resultCh == nil {
+		// Catch SIGINT to prevent process termination. Since we use
+		// tea.WithoutSignalHandler(), Ctrl+C in raw mode arrives as a key event.
+		// But during Loader execution (spinners), the terminal is temporarily
+		// in cooked mode where Ctrl+C generates SIGINT. Without this handler,
+		// Go's default SIGINT handler would kill the process and leave the
+		// terminal in raw mode.
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt)
+		defer signal.Stop(sigCh)
+		go func() {
+			for range sigCh {
+			} // drain signals
+		}()
+
+		e.resultCh = make(chan promptResult, 1)
+		composite := newCompositeModel(e.keyBindings, e.bus, e.resultCh)
 		progOpts := []tea.ProgramOption{
 			tea.WithoutSignalHandler(),
 			tea.WithOutput(e.out()),
@@ -139,9 +204,16 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		if e.reader != nil {
 			progOpts = append(progOpts, tea.WithInput(e.reader))
 		}
-		program = tea.NewProgram(&composite, progOpts...)
-		go func() { _, _ = program.Run() }()
-		defer program.Quit()
+		e.program = tea.NewProgram(&composite, progOpts...)
+		progDone := make(chan struct{})
+		go func() {
+			defer close(progDone)
+			_, _ = e.program.Run()
+		}()
+		defer func() {
+			e.program.Quit()
+			<-progDone // wait for program to fully exit and restore terminal
+		}()
 	}
 
 	for e.current < len(flow.Steps) {
@@ -185,8 +257,8 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			return fmt.Errorf("step %q: unsupported prompt type: %d", step.Name, step.Prompt)
 		}
 
-		if program != nil {
-			program.Send(showPromptMsg{
+		if e.program != nil {
+			e.program.Send(showPromptMsg{
 				model: promptModel,
 				stepMsg: StepChangedMsg{
 					Current:    e.current + 1,
@@ -199,7 +271,7 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		}
 
 		// Wait for result from composite and process it.
-		result := <-resultCh
+		result := <-e.resultCh
 		done, err := e.handlePromptResult(result, step, choices, canGoBack)
 		if err != nil {
 			return err
@@ -218,11 +290,18 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 func (e *Engine) handlePromptResult(result promptResult, step Step, choices []Choice, canGoBack bool) (bool, error) {
 	switch result.action {
 	case ActionExit:
+		if e.exitConfirm && e.program != nil {
+			if stayed := e.confirmExit(); stayed {
+				return false, nil // re-prompt current step
+			}
+		}
+		_, _ = fmt.Fprintln(e.out())
 		return false, fmt.Errorf("wizard cancelled")
 	case ActionBack:
 		if canGoBack {
 			e.rewindOne()
 		} else {
+			_, _ = fmt.Fprintln(e.out())
 			return false, fmt.Errorf("wizard cancelled")
 		}
 		return false, nil
@@ -596,6 +675,31 @@ func (e *Engine) invalidateDownstream(changedIdx int) {
 			e.steps[i].loaded = false
 		}
 	}
+}
+
+// --- Exit confirmation ---
+
+// confirmExit swaps the active prompt with a "Exit wizard?" confirm prompt.
+// Returns true if the user chose to stay (declined or pressed Esc/Ctrl+C again).
+func (e *Engine) confirmExit() (stayed bool) {
+	cfg := tui.ResolveConfirmConfig([]tui.ConfirmOption{tui.WithConfirmDefault(true)})
+	confirmModel := bubbletea.NewConfirmPrompt("Exit wizard?", cfg)
+
+	e.program.Send(showPromptMsg{
+		model:   confirmModel,
+		stepMsg: StepChangedMsg{PromptType: ConfirmPrompt},
+	})
+
+	result := <-e.resultCh
+	// If user confirmed exit, return false (don't stay).
+	// If user declined, pressed Esc (ActionBack), or Ctrl+C again (ActionExit on the confirm),
+	// return true (stay in wizard).
+	if result.action == ActionNone {
+		if confirmed, ok := result.value.(bool); ok && confirmed {
+			return false // exit
+		}
+	}
+	return true // stay
 }
 
 // --- Utilities ---

@@ -48,7 +48,7 @@ func TestSelectPrompt_EscWithFilter_ClearsFilter(t *testing.T) {
 
 	// Esc should clear filter, not go back
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = updated.(PromptModel)
+	_ = updated.(PromptModel)
 
 	// Should NOT produce GoBackMsg
 	if cmd != nil {
