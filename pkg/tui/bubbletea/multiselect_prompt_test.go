@@ -22,13 +22,13 @@ func TestMultiSelectPrompt_SpaceAndEnter(t *testing.T) {
 	m := NewMultiSelectPrompt("Pick", []string{"alpha", "beta", "gamma"}, cfg)
 
 	// Space to toggle first item
-	updated, _ := m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 	m = updated.(PromptModel)
 
 	// Down + Space to toggle second
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(PromptModel)
-	updated, _ = m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 	m = updated.(PromptModel)
 
 	// Enter to confirm
