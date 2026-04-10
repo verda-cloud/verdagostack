@@ -11,17 +11,18 @@ import (
 )
 
 type multiSelectModel struct {
-	prompt   string
-	choices  []string
-	cursor   int
-	selected map[int]bool
-	pageSize int
-	loop     bool
-	min      int
-	max      int
-	done     bool
-	aborted  bool
-	err      string
+	prompt      string
+	choices     []string
+	cursor      int
+	selected    map[int]bool
+	pageSize    int
+	loop        bool
+	min         int
+	max         int
+	done        bool
+	aborted     bool
+	interrupted bool // true for Ctrl+C (hard cancel), false for Esc (soft cancel)
+	err         string
 }
 
 func newMultiSelectModel(prompt string, choices []string, cfg tui.MultiSelectConfig) multiSelectModel {
@@ -82,7 +83,10 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.done = true
 			return m, tea.Quit
-		case keyCtrlC, keyEsc:
+		case keyCtrlC:
+			m.interrupted = true
+			return m, tea.Quit
+		case keyEsc:
 			m.aborted = true
 			return m, tea.Quit
 		}
@@ -156,18 +160,15 @@ func (p *Prompter) MultiSelect(ctx context.Context, prompt string, choices []str
 	cfg := tui.ResolveMultiSelectConfig(opts)
 	model := newMultiSelectModel(prompt, choices, cfg)
 
-	program := tea.NewProgram(model,
-		tea.WithInput(p.in),
-		tea.WithOutput(p.out),
-		tea.WithContext(ctx),
-	)
-
-	result, err := program.Run()
-	if err != nil {
-		return nil, fmt.Errorf("multi-select prompt: %w", err)
+	r := p.runProgram(ctx, model)
+	if r.interrupted {
+		return nil, tui.ErrInterrupted
+	}
+	if r.err != nil {
+		return nil, fmt.Errorf("multi-select prompt: %w", r.err)
 	}
 
-	m := result.(multiSelectModel)
+	m := r.model.(multiSelectModel)
 	if m.aborted {
 		return nil, context.Canceled
 	}

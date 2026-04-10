@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"slices"
+	"time"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
@@ -35,16 +37,23 @@ type stepRuntime struct {
 // to the same step before giving up with an error.
 const maxRewindsPerStep = 3
 
+// doubleEscWindow is the maximum time between two consecutive Esc presses
+// for them to be treated as a "double Esc" (exit wizard).
+const doubleEscWindow = 500 * time.Millisecond
+
 // Engine runs a wizard Flow interactively.
 type Engine struct {
-	prompter tui.Prompter
-	status   tui.Status
-	store    *Store
-	bus      *MessageBus
-	flow     *Flow         // the flow being executed (set during Run)
-	steps    []stepRuntime // per-step runtime state, indexed same as flow.Steps
-	current  int
-	writer   io.Writer
+	prompter    tui.Prompter
+	status      tui.Status
+	store       *Store
+	bus         *MessageBus
+	flow        *Flow         // the flow being executed (set during Run)
+	steps       []stepRuntime // per-step runtime state, indexed same as flow.Steps
+	current     int
+	writer      io.Writer
+	exitConfirm bool           // when true, Ctrl+C prompts "Exit wizard?" before exiting
+	lastEscAt   time.Time      // tracks last Esc press for double-Esc detection
+	sigCh       chan os.Signal // monitors SIGINT to distinguish Ctrl+C from Esc
 }
 
 // EngineOption configures the Engine.
@@ -53,6 +62,12 @@ type EngineOption func(*Engine)
 // WithOutput sets the writer for engine messages (defaults to os.Stderr).
 func WithOutput(w io.Writer) EngineOption {
 	return func(e *Engine) { e.writer = w }
+}
+
+// WithExitConfirmation enables a "Exit wizard?" confirmation prompt when the
+// user presses Ctrl+C. Without this option, Ctrl+C exits immediately.
+func WithExitConfirmation() EngineOption {
+	return func(e *Engine) { e.exitConfirm = true }
 }
 
 // NewEngine creates a wizard engine with the given prompter and optional status.
@@ -85,12 +100,35 @@ func (e *Engine) Collected() map[string]any {
 	return e.store.Collected()
 }
 
+// wasCtrlC drains the SIGINT channel and returns true if Ctrl+C was pressed
+// since the last drain. Also returns true if the error itself is
+// tui.ErrInterrupted (set by the prompter when it detects Ctrl+C directly).
+func (e *Engine) wasCtrlC(err error) bool {
+	// Check if the prompter already identified this as Ctrl+C.
+	if errors.Is(err, tui.ErrInterrupted) {
+		return true
+	}
+	// Check if SIGINT was received (catches Ctrl+C even when the prompter
+	// can't distinguish it from Esc, e.g. Bubble Tea framework-level handling).
+	select {
+	case <-e.sigCh:
+		return true
+	default:
+		return false
+	}
+}
+
 // Run executes the flow step by step.
 func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	e.current = 0
 	e.flow = flow
 	e.steps = make([]stepRuntime, len(flow.Steps))
 	e.store.Reset()
+
+	// Monitor SIGINT so the engine can distinguish Ctrl+C from Esc.
+	e.sigCh = make(chan os.Signal, 1)
+	signal.Notify(e.sigCh, os.Interrupt)
+	defer signal.Stop(e.sigCh)
 
 	// Initialize message bus with layout views (or default).
 	e.bus = NewMessageBus()
@@ -128,10 +166,22 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 
 		choices, err := e.loadChoices(ctx, step)
 		if err != nil {
-			// Treat context.Canceled from a Loader as a back signal,
-			// so Esc in Loader-managed prompts navigates back instead
-			// of terminating the wizard.
-			if errors.Is(err, context.Canceled) && ctx.Err() == nil {
+			if isCancelErr(err) && ctx.Err() == nil {
+				// Ctrl+C: always exit wizard.
+				if e.wasCtrlC(err) {
+					if e.exitConfirm {
+						if stayed := e.confirmExit(ctx); stayed {
+							continue
+						}
+					}
+					return fmt.Errorf("wizard cancelled")
+				}
+				// Esc: navigate back or exit if first step.
+				now := time.Now()
+				if !e.lastEscAt.IsZero() && now.Sub(e.lastEscAt) < doubleEscWindow {
+					return fmt.Errorf("wizard cancelled")
+				}
+				e.lastEscAt = now
 				if e.hasEditablePriorStep() {
 					e.rewindOne()
 					continue
@@ -231,13 +281,30 @@ func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) 
 	value, err := e.prompt(ctx, step, choices, canGoBack)
 
 	if errors.Is(err, errGoBack) {
+		e.lastEscAt = time.Time{} // reset double-esc tracker on explicit back
 		e.rewindOne()
 		return nil
 	}
-	if errors.Is(err, context.Canceled) {
+	// Any cancel-like error: check if Ctrl+C (SIGINT) was the cause.
+	if err != nil && isCancelErr(err) {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		// Ctrl+C: always exit wizard (with optional confirmation).
+		if e.wasCtrlC(err) {
+			if e.exitConfirm {
+				if stayed := e.confirmExit(ctx); stayed {
+					return nil // re-prompt current step
+				}
+			}
+			return fmt.Errorf("wizard cancelled")
+		}
+		// Esc: go back, or exit on double-Esc / first step.
+		now := time.Now()
+		if !e.lastEscAt.IsZero() && now.Sub(e.lastEscAt) < doubleEscWindow {
+			return fmt.Errorf("wizard cancelled")
+		}
+		e.lastEscAt = now
 		if canGoBack {
 			e.rewindOne()
 			return nil
@@ -273,6 +340,7 @@ func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) 
 	if step.Setter != nil {
 		step.Setter(value)
 	}
+	e.lastEscAt = time.Time{} // reset double-esc tracker on successful step
 	e.transition(e.current, stateCompleted, value)
 
 	// Broadcast collected change to all views and re-render.
@@ -586,6 +654,19 @@ func (e *Engine) promptConfirm(ctx context.Context, step Step) (any, error) {
 	return e.prompter.Confirm(ctx, promptLabel(step), opts...)
 }
 
+// --- Exit confirmation ---
+
+// confirmExit prompts the user with a visible warning and a yes/no confirm.
+// Returns true if the user chose to stay (declined exit or error occurred).
+func (e *Engine) confirmExit(ctx context.Context) (stayed bool) {
+	_, _ = fmt.Fprintf(e.out(), "\n  ⚠  All progress will be lost.\n\n")
+	confirmed, err := e.prompter.Confirm(ctx, "Exit wizard?")
+	if err != nil || !confirmed {
+		return true // stay in wizard
+	}
+	return false // exit
+}
+
 // --- Rendering ---
 
 // renderViews outputs view renders that changed since the last call.
@@ -598,6 +679,37 @@ func (e *Engine) renderViews() {
 }
 
 // --- Utilities ---
+
+// isCancelErr returns true if the error represents a user cancellation,
+// regardless of the specific error type. Bubble Tea may return different
+// error types for Ctrl+C vs Esc, and they may be wrapped.
+func isCancelErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	if errors.Is(err, tui.ErrInterrupted) {
+		return true
+	}
+	// Bubble Tea returns "program was interrupted" or "program was killed" errors.
+	msg := err.Error()
+	return contains(msg, "interrupted") || contains(msg, "killed")
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchString(s, substr)
+}
+
+func searchString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
 
 // promptLabel returns the display text for a step, falling back to Name if Description is empty.
 func promptLabel(step Step) string {

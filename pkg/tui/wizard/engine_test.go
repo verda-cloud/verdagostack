@@ -2035,10 +2035,57 @@ func TestEngine_LoaderReceivesStatusAndStore(t *testing.T) {
 	}
 }
 
-func TestEngine_LoaderCanceled_GoesBack(t *testing.T) {
-	// When a Loader returns context.Canceled (e.g., user presses Esc in a
-	// Loader-managed sub-prompt), the wizard should navigate back to the
-	// previous editable step instead of aborting.
+func TestEngine_LoaderCanceled_Aborts(t *testing.T) {
+	// When a Loader returns ErrInterrupted (e.g., user presses Ctrl+C in a
+	// Loader-managed sub-prompt), the wizard should exit immediately.
+	var region string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "Finland", Value: "FIN-01"},
+					Choice{Label: "Sweden", Value: "SWE-01"},
+				),
+				Setter: func(v any) { region = v.(string) },
+			},
+			{
+				Name:     "gpu",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
+					return nil, tui.ErrInterrupted
+				},
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	// Step 1: select Finland (idx 0)
+	// Step 2: loader returns ErrInterrupted → "wizard cancelled"
+	p := tuitesting.New().
+		AddSelect(0) // region: Finland
+
+	engine := NewEngine(p, nil, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "wizard cancelled") {
+		t.Errorf("expected 'wizard cancelled', got %q", err)
+	}
+	if region != "FIN-01" {
+		t.Errorf("expected region 'FIN-01', got %q", region)
+	}
+}
+
+func TestEngine_LoaderEsc_RewindsBack(t *testing.T) {
+	// When a Loader returns context.Canceled (Esc), the wizard should
+	// rewind to the previous editable step. On retry, the loader succeeds.
 	var region, gpu string
 
 	callCount := 0
@@ -2062,13 +2109,10 @@ func TestEngine_LoaderCanceled_GoesBack(t *testing.T) {
 				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					callCount++
 					if callCount == 1 {
-						// First time: simulate Esc → context.Canceled
-						return nil, context.Canceled
+						return nil, context.Canceled // first Esc → rewind
 					}
-					// Second time: return real choices
 					return []Choice{
 						{Label: "H100", Value: "h100"},
-						{Label: "A100", Value: "a100"},
 					}, nil
 				},
 				Setter: func(v any) { gpu = v.(string) },
@@ -2076,13 +2120,13 @@ func TestEngine_LoaderCanceled_GoesBack(t *testing.T) {
 		},
 	}
 
-	// Step 1: select Finland (idx 0)
-	// Step 2: loader returns context.Canceled → back to step 1
-	// Step 1 again: select Sweden (idx 1)
-	// Step 2: loader succeeds, select H100 (idx 0)
+	// Step 1: select Finland → advance to step 2
+	// Step 2: loader Esc → rewind to step 1
+	// Step 1: select Sweden → advance to step 2
+	// Step 2: loader succeeds → select H100
 	p := tuitesting.New().
-		AddSelect(0). // region: Finland
-		AddSelect(1). // region (again): Sweden
+		AddSelect(0). // region: Finland (first pass)
+		AddSelect(1). // region: Sweden (after rewind)
 		AddSelect(0)  // gpu: H100
 
 	engine := NewEngine(p, nil, WithOutput(io.Discard))
@@ -2090,6 +2134,7 @@ func TestEngine_LoaderCanceled_GoesBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	// Rewind changed region from Finland to Sweden
 	if region != "SWE-01" {
 		t.Errorf("expected region 'SWE-01', got %q", region)
 	}
@@ -2098,9 +2143,37 @@ func TestEngine_LoaderCanceled_GoesBack(t *testing.T) {
 	}
 }
 
-func TestEngine_LoaderCanceled_FirstStep_Aborts(t *testing.T) {
-	// When the Loader on the first (and only editable) step returns
-	// context.Canceled, the wizard should return "wizard cancelled".
+func TestEngine_LoaderInterrupted_FirstStep_Aborts(t *testing.T) {
+	// When the Loader on the first step returns ErrInterrupted (Ctrl+C),
+	// the wizard should exit with "wizard cancelled".
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
+					return nil, tui.ErrInterrupted
+				},
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	engine := NewEngine(tuitesting.New(), nil, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "wizard cancelled") {
+		t.Errorf("expected 'wizard cancelled', got %q", err)
+	}
+}
+
+func TestEngine_LoaderEsc_FirstStep_Aborts(t *testing.T) {
+	// When the Loader on the first step returns context.Canceled (Esc)
+	// with no prior editable steps, the wizard should exit.
 	flow := &Flow{
 		Name: "test",
 		Steps: []Step{
@@ -2126,9 +2199,9 @@ func TestEngine_LoaderCanceled_FirstStep_Aborts(t *testing.T) {
 	}
 }
 
-func TestEngine_LoaderCanceled_AllPriorFixed_Aborts(t *testing.T) {
-	// If all prior steps are fixed (set via IsSet), loader cancel on the
-	// last step should abort with "wizard cancelled".
+func TestEngine_LoaderInterrupted_AllPriorFixed_Aborts(t *testing.T) {
+	// If all prior steps are fixed (set via IsSet), Ctrl+C (ErrInterrupted)
+	// on the last step should abort with "wizard cancelled".
 	flow := &Flow{
 		Name: "test",
 		Steps: []Step{
@@ -2146,7 +2219,7 @@ func TestEngine_LoaderCanceled_AllPriorFixed_Aborts(t *testing.T) {
 				Prompt:   SelectPrompt,
 				Required: true,
 				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
-					return nil, context.Canceled
+					return nil, tui.ErrInterrupted
 				},
 				Setter: func(v any) {},
 			},
@@ -2154,6 +2227,76 @@ func TestEngine_LoaderCanceled_AllPriorFixed_Aborts(t *testing.T) {
 	}
 
 	engine := NewEngine(tuitesting.New(), nil, WithOutput(io.Discard))
+	err := engine.Run(context.Background(), flow)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "wizard cancelled") {
+		t.Errorf("expected 'wizard cancelled', got %q", err)
+	}
+}
+
+func TestEngine_ExitConfirmation_Declined_RepromptsStep(t *testing.T) {
+	// With WithExitConfirmation(), Ctrl+C (ErrInterrupted) should prompt
+	// "Exit wizard?" and re-prompt the current step when the user declines.
+	var region string
+
+	callCount := 0
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
+					callCount++
+					if callCount == 1 {
+						return nil, tui.ErrInterrupted
+					}
+					return []Choice{
+						{Label: "Finland", Value: "FIN-01"},
+					}, nil
+				},
+				Setter: func(v any) { region = v.(string) },
+			},
+		},
+	}
+
+	// Loader interrupted → "Exit wizard?" → decline → loader re-runs → select Finland
+	p := tuitesting.New().
+		AddConfirm(false). // "Exit wizard?" → no
+		AddSelect(0)       // region: Finland
+
+	engine := NewEngine(p, nil, WithOutput(io.Discard), WithExitConfirmation())
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if region != "FIN-01" {
+		t.Errorf("expected region 'FIN-01', got %q", region)
+	}
+}
+
+func TestEngine_ExitConfirmation_Confirmed_Exits(t *testing.T) {
+	// With WithExitConfirmation(), Ctrl+C + confirm should exit with "wizard cancelled".
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
+					return nil, tui.ErrInterrupted
+				},
+				Setter: func(v any) {},
+			},
+		},
+	}
+
+	p := tuitesting.New().AddConfirm(true) // "Exit wizard?" → yes
+	engine := NewEngine(p, nil, WithOutput(io.Discard), WithExitConfirmation())
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
 		t.Fatal("expected error, got nil")
