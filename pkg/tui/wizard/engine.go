@@ -414,9 +414,11 @@ func (e *Engine) handlePromptResult(result promptResult, step Step, choices []Ch
 		}
 	}
 
-	// Apply default for non-required empty values.
+	// Apply default when the user submits an empty value. This covers both
+	// non-required steps (accept default) and required steps where the
+	// default was shown as a placeholder (press Enter to accept).
 	col := e.store.Collected()
-	if !step.Required && isEmpty(value) && step.Default != nil {
+	if isEmpty(value) && step.Default != nil {
 		value = step.Default(col)
 	}
 
@@ -504,7 +506,11 @@ func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) b
 		if step.Default != nil {
 			col := e.store.Collected()
 			if d, ok := step.Default(col).(string); ok && d != "" {
-				opts = append(opts, tui.WithDefault(d))
+				// Use placeholder instead of pre-filling the value. Pre-filled
+				// values cause user input to be appended to the default rather
+				// than replacing it. The engine applies the default when the
+				// user submits an empty field (press Enter to accept).
+				opts = append(opts, tui.WithPlaceholder(d))
 			}
 		}
 		cfg := tui.ResolveTextInputConfig(opts)
