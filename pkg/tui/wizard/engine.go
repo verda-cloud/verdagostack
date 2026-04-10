@@ -50,6 +50,7 @@ type Engine struct {
 	steps          []stepRuntime // per-step runtime state, indexed same as flow.Steps
 	current        int
 	writer         io.Writer
+	reader         io.Reader
 	keyBindings    []KeyBinding
 	resultOverride chan promptResult // test-only: bypasses composite model
 }
@@ -65,6 +66,11 @@ func WithOutput(w io.Writer) EngineOption {
 // WithKeyBindings sets custom wizard-level key bindings.
 func WithKeyBindings(bindings ...KeyBinding) EngineOption {
 	return func(e *Engine) { e.keyBindings = bindings }
+}
+
+// WithInput sets the input reader for the composite tea.Program (defaults to os.Stdin).
+func WithInput(r io.Reader) EngineOption {
+	return func(e *Engine) { e.reader = r }
 }
 
 // NewEngine creates a wizard engine with the given prompter and optional status.
@@ -126,10 +132,14 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	if resultCh == nil {
 		resultCh = make(chan promptResult, 1)
 		composite := newCompositeModel(e.keyBindings, e.bus, resultCh)
-		program = tea.NewProgram(&composite,
+		progOpts := []tea.ProgramOption{
 			tea.WithoutSignalHandler(),
 			tea.WithOutput(e.out()),
-		)
+		}
+		if e.reader != nil {
+			progOpts = append(progOpts, tea.WithInput(e.reader))
+		}
+		program = tea.NewProgram(&composite, progOpts...)
 		go func() { _, _ = program.Run() }()
 		defer program.Quit()
 	}
