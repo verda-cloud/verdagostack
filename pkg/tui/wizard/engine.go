@@ -177,47 +177,78 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		e.bus.Broadcast(StoreChangedMsg{Key: key, Value: value})
 	}
 
-	// Create result channel and optionally the composite tea.Program.
+	// In test mode (WithTestResults), bypass the composite program entirely.
 	e.resultCh = e.resultOverride
 	e.program = nil
-	if e.resultCh == nil {
-		// Catch SIGINT to prevent process termination. Since we use
-		// tea.WithoutSignalHandler(), Ctrl+C in raw mode arrives as a key event.
-		// But during Loader execution (spinners), the terminal is temporarily
-		// in cooked mode where Ctrl+C generates SIGINT. Without this handler,
-		// Go's default SIGINT handler would kill the process and leave the
-		// terminal in raw mode.
+
+	// Catch SIGINT to prevent process termination. Since we use
+	// tea.WithoutSignalHandler(), Ctrl+C in raw mode arrives as a key event.
+	// But during Loader execution (spinners), the terminal is temporarily
+	// in cooked mode where Ctrl+C generates SIGINT. Without this handler,
+	// Go's default SIGINT handler would kill the process and leave the
+	// terminal in raw mode.
+	if e.resultOverride == nil {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt)
 		defer signal.Stop(sigCh)
 		go func() {
 			for range sigCh {
-			} // drain signals
-		}()
-
-		e.resultCh = make(chan promptResult, 1)
-		composite := newCompositeModel(e.keyBindings, e.bus, e.resultCh)
-		progOpts := []tea.ProgramOption{
-			tea.WithoutSignalHandler(),
-			tea.WithOutput(e.out()),
-		}
-		if e.reader != nil {
-			progOpts = append(progOpts, tea.WithInput(e.reader))
-		}
-		e.program = tea.NewProgram(&composite, progOpts...)
-		progDone := make(chan struct{})
-		go func() {
-			defer close(progDone)
-			_, _ = e.program.Run()
-		}()
-		defer func() {
-			e.program.Quit()
-			<-progDone // wait for program to fully exit and restore terminal
+			}
 		}()
 	}
 
-	for e.current < len(flow.Steps) {
-		step := flow.Steps[e.current]
+	// When a custom reader is set (WithInput, typically pipe-based tests),
+	// use a persistent program for the entire wizard. Pipe inputs cannot
+	// survive program restart because the first program may consume buffered
+	// bytes intended for later prompts.
+	//
+	// When using real stdin (e.reader == nil), create a fresh program per
+	// prompt. This prevents Loaders (which may create their own tea.Programs
+	// for sub-flows like prompter.Select/Spinner) from racing with the
+	// composite program over stdin.
+	if e.reader != nil && e.resultOverride == nil {
+		return e.runPersistentProgram(ctx)
+	}
+	return e.runPerPromptProgram(ctx)
+}
+
+// runPersistentProgram runs the wizard with a single persistent composite
+// program. Used when a custom reader is set (pipe-based tests) where
+// restarting programs would lose buffered input.
+func (e *Engine) runPersistentProgram(ctx context.Context) error {
+	e.resultCh = make(chan promptResult, 1)
+	composite := newCompositeModel(e.keyBindings, e.bus, e.resultCh)
+	progOpts := []tea.ProgramOption{
+		tea.WithoutSignalHandler(),
+		tea.WithOutput(e.out()),
+		tea.WithInput(e.reader),
+	}
+	e.program = tea.NewProgram(&composite, progOpts...)
+	progDone := make(chan struct{})
+	go func() {
+		defer close(progDone)
+		_, _ = e.program.Run()
+	}()
+	defer func() {
+		e.program.Quit()
+		<-progDone
+	}()
+
+	return e.stepLoop(ctx)
+}
+
+// runPerPromptProgram runs the wizard creating a fresh composite program for
+// each prompt. Loaders execute with no program running, so they can safely
+// create their own tea.Programs (spinners, sub-flow prompts) without stdin
+// conflicts.
+func (e *Engine) runPerPromptProgram(ctx context.Context) error {
+	return e.stepLoop(ctx)
+}
+
+// stepLoop is the main wizard loop shared by both program modes.
+func (e *Engine) stepLoop(ctx context.Context) error {
+	for e.current < len(e.flow.Steps) {
+		step := e.flow.Steps[e.current]
 		col := e.store.Collected()
 
 		// ShouldSkip takes priority over IsSet.
@@ -257,6 +288,13 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			return fmt.Errorf("step %q: unsupported prompt type: %d", step.Name, step.Prompt)
 		}
 
+		// In per-prompt mode (no persistent program), start a fresh program.
+		perPrompt := e.program == nil && e.resultOverride == nil
+		var progDone chan struct{}
+		if perPrompt {
+			progDone = e.startProgram()
+		}
+
 		if e.program != nil {
 			e.program.Send(showPromptMsg{
 				model: promptModel,
@@ -271,8 +309,14 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		}
 
 		// Wait for result from composite and process it.
+		// handlePromptResult may call confirmExit which reuses the program.
 		result := <-e.resultCh
 		done, err := e.handlePromptResult(result, step, choices, canGoBack)
+
+		if perPrompt {
+			e.stopProgram(progDone)
+		}
+
 		if err != nil {
 			return err
 		}
@@ -281,6 +325,43 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		}
 	}
 	return nil
+}
+
+// startProgram creates and starts a new composite tea.Program for one prompt.
+// Returns a channel that closes when the program exits.
+// In test mode (resultOverride set), this is a no-op.
+func (e *Engine) startProgram() chan struct{} {
+	if e.resultOverride != nil {
+		return nil // test mode — no real program
+	}
+
+	e.resultCh = make(chan promptResult, 1)
+	composite := newCompositeModel(e.keyBindings, e.bus, e.resultCh)
+	progOpts := []tea.ProgramOption{
+		tea.WithoutSignalHandler(),
+		tea.WithOutput(e.out()),
+	}
+	if e.reader != nil {
+		progOpts = append(progOpts, tea.WithInput(e.reader))
+	}
+	e.program = tea.NewProgram(&composite, progOpts...)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = e.program.Run()
+	}()
+	return done
+}
+
+// stopProgram quits the composite program and waits for it to fully exit
+// so the terminal is restored before the next Loader or prompt.
+func (e *Engine) stopProgram(done chan struct{}) {
+	if e.program == nil {
+		return
+	}
+	e.program.Quit()
+	<-done
+	e.program = nil
 }
 
 // handlePromptResult processes the result from a prompt.
