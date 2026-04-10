@@ -2,13 +2,16 @@ package wizard
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"slices"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/verda-cloud/verdagostack/pkg/tui"
+	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
 )
 
 // stepState represents the lifecycle state of a step during execution.
@@ -35,16 +38,25 @@ type stepRuntime struct {
 // to the same step before giving up with an error.
 const maxRewindsPerStep = 3
 
+// backLabel is appended to Select/MultiSelect choices when back navigation is possible.
+const backLabel = "← Back"
+
 // Engine runs a wizard Flow interactively.
 type Engine struct {
-	prompter tui.Prompter
-	status   tui.Status
-	store    *Store
-	bus      *MessageBus
-	flow     *Flow         // the flow being executed (set during Run)
-	steps    []stepRuntime // per-step runtime state, indexed same as flow.Steps
-	current  int
-	writer   io.Writer
+	prompter       tui.Prompter
+	status         tui.Status
+	store          *Store
+	bus            *MessageBus
+	flow           *Flow         // the flow being executed (set during Run)
+	steps          []stepRuntime // per-step runtime state, indexed same as flow.Steps
+	current        int
+	writer         io.Writer
+	reader         io.Reader
+	keyBindings    []KeyBinding
+	exitConfirm    bool              // when true, Ctrl+C prompts "Exit wizard?" before exiting
+	resultOverride chan promptResult // test-only: bypasses composite model
+	program        *tea.Program      // the running composite program (nil in test mode)
+	resultCh       chan promptResult // channel for receiving prompt results
 }
 
 // EngineOption configures the Engine.
@@ -55,12 +67,70 @@ func WithOutput(w io.Writer) EngineOption {
 	return func(e *Engine) { e.writer = w }
 }
 
+// WithKeyBindings sets custom wizard-level key bindings.
+func WithKeyBindings(bindings ...KeyBinding) EngineOption {
+	return func(e *Engine) { e.keyBindings = bindings }
+}
+
+// WithInput sets the input reader for the composite tea.Program (defaults to os.Stdin).
+func WithInput(r io.Reader) EngineOption {
+	return func(e *Engine) { e.reader = r }
+}
+
+// WithExitConfirmation enables a "Exit wizard?" confirmation prompt when the
+// user presses Ctrl+C. Without this option, Ctrl+C exits immediately.
+func WithExitConfirmation() EngineOption {
+	return func(e *Engine) { e.exitConfirm = true }
+}
+
+// TestResult represents a prompt result for testing.
+type TestResult struct {
+	Value  any
+	Action Action
+}
+
+// WithTestResults configures the engine to use pre-built results instead of
+// running the composite tea.Program. This is for external package tests.
+func WithTestResults(results ...TestResult) EngineOption {
+	return func(e *Engine) {
+		ch := make(chan promptResult, len(results))
+		for _, r := range results {
+			ch <- promptResult{value: r.Value, action: r.Action}
+		}
+		close(ch)
+		e.resultOverride = ch
+	}
+}
+
+// Test result constructors for external package tests.
+
+// SelectResult creates a test result for selecting an index.
+func SelectResult(idx int) TestResult { return TestResult{Value: idx, Action: ActionNone} }
+
+// TextResult creates a test result for text input.
+func TextResult(text string) TestResult { return TestResult{Value: text, Action: ActionNone} }
+
+// ConfirmResult creates a test result for a confirm prompt.
+func ConfirmResult(yes bool) TestResult { return TestResult{Value: yes, Action: ActionNone} }
+
+// MultiSelectResult creates a test result for multi-select.
+func MultiSelectResult(indices []int) TestResult {
+	return TestResult{Value: indices, Action: ActionNone}
+}
+
+// BackResult creates a test result for back navigation (Esc).
+func BackResult() TestResult { return TestResult{Action: ActionBack} }
+
+// ExitResult creates a test result for exit (Ctrl+C).
+func ExitResult() TestResult { return TestResult{Action: ActionExit} }
+
 // NewEngine creates a wizard engine with the given prompter and optional status.
 func NewEngine(prompter tui.Prompter, status tui.Status, opts ...EngineOption) *Engine {
 	e := &Engine{
-		prompter: prompter,
-		status:   status,
-		store:    NewStore(),
+		prompter:    prompter,
+		status:      status,
+		store:       NewStore(),
+		keyBindings: DefaultKeyBindings(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -107,6 +177,45 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		e.bus.Broadcast(StoreChangedMsg{Key: key, Value: value})
 	}
 
+	// Create result channel and optionally the composite tea.Program.
+	e.resultCh = e.resultOverride
+	e.program = nil
+	if e.resultCh == nil {
+		// Catch SIGINT to prevent process termination. Since we use
+		// tea.WithoutSignalHandler(), Ctrl+C in raw mode arrives as a key event.
+		// But during Loader execution (spinners), the terminal is temporarily
+		// in cooked mode where Ctrl+C generates SIGINT. Without this handler,
+		// Go's default SIGINT handler would kill the process and leave the
+		// terminal in raw mode.
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt)
+		defer signal.Stop(sigCh)
+		go func() {
+			for range sigCh {
+			} // drain signals
+		}()
+
+		e.resultCh = make(chan promptResult, 1)
+		composite := newCompositeModel(e.keyBindings, e.bus, e.resultCh)
+		progOpts := []tea.ProgramOption{
+			tea.WithoutSignalHandler(),
+			tea.WithOutput(e.out()),
+		}
+		if e.reader != nil {
+			progOpts = append(progOpts, tea.WithInput(e.reader))
+		}
+		e.program = tea.NewProgram(&composite, progOpts...)
+		progDone := make(chan struct{})
+		go func() {
+			defer close(progDone)
+			_, _ = e.program.Run()
+		}()
+		defer func() {
+			e.program.Quit()
+			<-progDone // wait for program to fully exit and restore terminal
+		}()
+	}
+
 	for e.current < len(flow.Steps) {
 		step := flow.Steps[e.current]
 		col := e.store.Collected()
@@ -128,16 +237,6 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 
 		choices, err := e.loadChoices(ctx, step)
 		if err != nil {
-			// Treat context.Canceled from a Loader as a back signal,
-			// so Esc in Loader-managed prompts navigates back instead
-			// of terminating the wizard.
-			if errors.Is(err, context.Canceled) && ctx.Err() == nil {
-				if e.hasEditablePriorStep() {
-					e.rewindOne()
-					continue
-				}
-				return fmt.Errorf("wizard cancelled")
-			}
 			return fmt.Errorf("step %q: %w", step.Name, err)
 		}
 
@@ -151,11 +250,199 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 			}
 		}
 
-		if err := e.handlePrompt(ctx, step, choices); err != nil {
+		// Build prompt model and send to composite.
+		canGoBack := e.hasEditablePriorStep()
+		promptModel := e.buildPromptModel(step, choices, canGoBack)
+		if promptModel == nil {
+			return fmt.Errorf("step %q: unsupported prompt type: %d", step.Name, step.Prompt)
+		}
+
+		if e.program != nil {
+			e.program.Send(showPromptMsg{
+				model: promptModel,
+				stepMsg: StepChangedMsg{
+					Current:    e.current + 1,
+					Total:      len(e.flow.Steps),
+					StepName:   step.Name,
+					PromptType: step.Prompt,
+					Collected:  e.store.Collected(),
+				},
+			})
+		}
+
+		// Wait for result from composite and process it.
+		result := <-e.resultCh
+		done, err := e.handlePromptResult(result, step, choices, canGoBack)
+		if err != nil {
 			return err
+		}
+		if done {
+			e.current++
 		}
 	}
 	return nil
+}
+
+// handlePromptResult processes the result from a prompt.
+// Returns (true, nil) when the step is completed and the engine should advance.
+// Returns (false, nil) when the engine should re-prompt or rewind (current adjusted internally).
+// Returns (false, err) on fatal error.
+func (e *Engine) handlePromptResult(result promptResult, step Step, choices []Choice, canGoBack bool) (bool, error) {
+	switch result.action {
+	case ActionExit:
+		if e.exitConfirm && e.program != nil {
+			if stayed := e.confirmExit(); stayed {
+				return false, nil // re-prompt current step
+			}
+		}
+		_, _ = fmt.Fprintln(e.out())
+		return false, fmt.Errorf("wizard cancelled")
+	case ActionBack:
+		if canGoBack {
+			e.rewindOne()
+		} else {
+			_, _ = fmt.Fprintln(e.out())
+			return false, fmt.Errorf("wizard cancelled")
+		}
+		return false, nil
+	}
+
+	// ActionNone — prompt completed with a value.
+	value := result.value
+
+	// Handle "← Back" selection in select/multiselect.
+	if idx, ok := value.(int); ok && canGoBack && idx == len(choices) {
+		e.rewindOne()
+		return false, nil
+	}
+
+	// Convert index to Choice value for select prompts.
+	if step.Prompt == SelectPrompt {
+		if idx, ok := value.(int); ok {
+			value = choices[idx].Value
+		}
+	}
+	// Convert indices to values for multiselect.
+	if step.Prompt == MultiSelectPrompt {
+		if indices, ok := value.([]int); ok {
+			values := make([]string, len(indices))
+			for i, idx := range indices {
+				values[i] = choices[idx].Value
+			}
+			value = values
+		}
+	}
+
+	// Apply default for non-required empty values.
+	col := e.store.Collected()
+	if !step.Required && isEmpty(value) && step.Default != nil {
+		value = step.Default(col)
+	}
+
+	// Enforce required.
+	if step.Required && isEmpty(value) {
+		return false, nil // re-prompt
+	}
+
+	// Validate.
+	if step.Validate != nil {
+		if err := step.Validate(value); err != nil {
+			return false, nil // re-prompt
+		}
+	}
+
+	// Complete the step.
+	if step.Setter != nil {
+		step.Setter(value)
+	}
+	e.transition(e.current, stateCompleted, value)
+
+	e.bus.Broadcast(CollectedChangedMsg{
+		Key:       step.Name,
+		Value:     value,
+		Collected: e.store.Collected(),
+	})
+
+	e.invalidateDownstream(e.current)
+	return true, nil
+}
+
+// buildPromptModel creates the appropriate PromptModel for a step.
+func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) bubbletea.PromptModel {
+	switch step.Prompt {
+	case SelectPrompt:
+		labels := choiceLabels(choices)
+		if canGoBack {
+			labels = append(labels, backLabel)
+		}
+		var opts []tui.SelectOption
+		if step.Default != nil {
+			col := e.store.Collected()
+			if defVal, ok := step.Default(col).(string); ok {
+				for i, c := range choices {
+					if c.Value == defVal {
+						opts = append(opts, tui.WithSelectDefault(i))
+						break
+					}
+				}
+			}
+		}
+		cfg := tui.ResolveSelectConfig(opts)
+		return bubbletea.NewSelectPrompt(promptLabel(step), labels, cfg)
+	case MultiSelectPrompt:
+		labels := choiceLabels(choices)
+		if canGoBack {
+			labels = append(labels, backLabel)
+		}
+		var opts []tui.MultiSelectOption
+		if step.Required {
+			opts = append(opts, tui.WithMinSelections(1))
+		}
+		if step.Default != nil {
+			col := e.store.Collected()
+			if defVals, ok := step.Default(col).([]string); ok && len(defVals) > 0 {
+				valSet := make(map[string]bool, len(defVals))
+				for _, v := range defVals {
+					valSet[v] = true
+				}
+				var defaults []int
+				for i, c := range choices {
+					if valSet[c.Value] {
+						defaults = append(defaults, i)
+					}
+				}
+				if len(defaults) > 0 {
+					opts = append(opts, tui.WithMultiSelectDefaults(defaults))
+				}
+			}
+		}
+		cfg := tui.ResolveMultiSelectConfig(opts)
+		return bubbletea.NewMultiSelectPrompt(promptLabel(step), labels, cfg)
+	case TextInputPrompt:
+		var opts []tui.TextInputOption
+		if step.Default != nil {
+			col := e.store.Collected()
+			if d, ok := step.Default(col).(string); ok && d != "" {
+				opts = append(opts, tui.WithDefault(d))
+			}
+		}
+		cfg := tui.ResolveTextInputConfig(opts)
+		return bubbletea.NewTextInputPrompt(promptLabel(step), cfg)
+	case ConfirmPrompt:
+		var opts []tui.ConfirmOption
+		if step.Default != nil {
+			col := e.store.Collected()
+			if d, ok := step.Default(col).(bool); ok {
+				opts = append(opts, tui.WithConfirmDefault(d))
+			}
+		}
+		cfg := tui.ResolveConfirmConfig(opts)
+		return bubbletea.NewConfirmPrompt(promptLabel(step), cfg)
+	case PasswordPrompt:
+		return bubbletea.NewPasswordPrompt(promptLabel(step))
+	default:
+		return nil
+	}
 }
 
 // handleFixed processes a step with IsSet=true.
@@ -210,82 +497,6 @@ func (e *Engine) handleEmptyChoices(step Step) (bool, error) {
 		return false, fmt.Errorf("step %q: %w", step.Name, err)
 	}
 	return true, nil
-}
-
-// handlePrompt prompts the user and processes the result.
-func (e *Engine) handlePrompt(ctx context.Context, step Step, choices []Choice) error {
-	// Broadcast step change to all views and render.
-	// Use absolute position (e.current+1 of len(Steps)) so the bar is
-	// stable — it always increments and the total never changes, even
-	// when steps are skipped or fixed.
-	e.bus.Broadcast(StepChangedMsg{
-		Current:    e.current + 1,
-		Total:      len(e.flow.Steps),
-		StepName:   step.Name,
-		PromptType: step.Prompt,
-		Collected:  e.store.Collected(),
-	})
-	e.renderViews()
-
-	canGoBack := e.hasEditablePriorStep()
-	value, err := e.prompt(ctx, step, choices, canGoBack)
-
-	if errors.Is(err, errGoBack) {
-		e.rewindOne()
-		return nil
-	}
-	if errors.Is(err, context.Canceled) {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if canGoBack {
-			e.rewindOne()
-			return nil
-		}
-		return fmt.Errorf("wizard cancelled")
-	}
-	if err != nil {
-		return fmt.Errorf("step %q: %w", step.Name, err)
-	}
-
-	col := e.store.Collected()
-
-	// Apply default for non-required empty values.
-	if !step.Required && isEmpty(value) && step.Default != nil {
-		value = step.Default(col)
-	}
-
-	// Enforce required.
-	if step.Required && isEmpty(value) {
-		_, _ = fmt.Fprintf(e.out(), "  %s is required — please provide a value.\n", promptLabel(step))
-		return nil // re-prompt same step (current not advanced)
-	}
-
-	// Validate.
-	if step.Validate != nil {
-		if err := step.Validate(value); err != nil {
-			_, _ = fmt.Fprintf(e.out(), "  Validation error: %s\n", err)
-			return nil // re-prompt
-		}
-	}
-
-	// Complete the step.
-	if step.Setter != nil {
-		step.Setter(value)
-	}
-	e.transition(e.current, stateCompleted, value)
-
-	// Broadcast collected change to all views and re-render.
-	e.bus.Broadcast(CollectedChangedMsg{
-		Key:       step.Name,
-		Value:     value,
-		Collected: e.store.Collected(),
-	})
-	e.renderViews()
-
-	e.invalidateDownstream(e.current)
-	e.current++
-	return nil
 }
 
 // --- State transitions ---
@@ -391,8 +602,7 @@ func (e *Engine) rewindToDependency(current Step) error {
 	}
 
 	// Deps are skipped — find the earliest editable step that could change
-	// the skip condition. We use earliest (not nearest) because the skip
-	// condition typically depends on an earlier choice like "environment".
+	// the skip condition.
 	if hasSkipped {
 		for i := 0; i < e.current; i++ {
 			if e.isEditable(i) {
@@ -413,7 +623,6 @@ func (e *Engine) rewindToDependency(current Step) error {
 func (e *Engine) isEditable(idx int) bool {
 	step := e.flow.Steps[idx]
 	rt := e.steps[idx]
-	// Steps pre-set via flags are not editable.
 	if rt.state == stateFixed {
 		return false
 	}
@@ -444,7 +653,6 @@ func (e *Engine) loadChoices(ctx context.Context, step Step) ([]Choice, error) {
 		return nil, nil
 	}
 
-	// Check cache — loaded distinguishes "not yet called" from "called, returned nil".
 	rt := &e.steps[e.current]
 	if rt.loaded {
 		return rt.choices, nil
@@ -469,132 +677,29 @@ func (e *Engine) invalidateDownstream(changedIdx int) {
 	}
 }
 
-// --- Prompting ---
+// --- Exit confirmation ---
 
-// errGoBack is a sentinel indicating the user chose to go back.
-var errGoBack = fmt.Errorf("go back")
+// confirmExit swaps the active prompt with a "Exit wizard?" confirm prompt.
+// Returns true if the user chose to stay (declined or pressed Esc/Ctrl+C again).
+func (e *Engine) confirmExit() (stayed bool) {
+	cfg := tui.ResolveConfirmConfig([]tui.ConfirmOption{tui.WithConfirmDefault(true)})
+	confirmModel := bubbletea.NewConfirmPrompt("Exit wizard?", cfg)
 
-// backLabel is appended to Select/MultiSelect choices when back navigation is possible.
-const backLabel = "← Back"
+	e.program.Send(showPromptMsg{
+		model:   confirmModel,
+		stepMsg: StepChangedMsg{PromptType: ConfirmPrompt},
+	})
 
-func (e *Engine) prompt(ctx context.Context, step Step, choices []Choice, canGoBack bool) (any, error) {
-	switch step.Prompt {
-	case SelectPrompt:
-		return e.promptSelect(ctx, step, choices, canGoBack)
-	case MultiSelectPrompt:
-		return e.promptMultiSelect(ctx, step, choices, canGoBack)
-	case TextInputPrompt:
-		return e.promptTextInput(ctx, step)
-	case ConfirmPrompt:
-		return e.promptConfirm(ctx, step)
-	case PasswordPrompt:
-		return e.prompter.Password(ctx, promptLabel(step))
-	default:
-		return nil, fmt.Errorf("unsupported prompt type: %d", step.Prompt)
-	}
-}
-
-func (e *Engine) promptSelect(ctx context.Context, step Step, choices []Choice, canGoBack bool) (any, error) {
-	labels := choiceLabels(choices)
-	if canGoBack {
-		labels = append(labels, backLabel)
-	}
-	var opts []tui.SelectOption
-	if step.Default != nil {
-		col := e.store.Collected() // safe: only needs completed values
-		if defVal, ok := step.Default(col).(string); ok {
-			for i, c := range choices {
-				if c.Value == defVal {
-					opts = append(opts, tui.WithSelectDefault(i))
-					break
-				}
-			}
+	result := <-e.resultCh
+	// If user confirmed exit, return false (don't stay).
+	// If user declined, pressed Esc (ActionBack), or Ctrl+C again (ActionExit on the confirm),
+	// return true (stay in wizard).
+	if result.action == ActionNone {
+		if confirmed, ok := result.value.(bool); ok && confirmed {
+			return false // exit
 		}
 	}
-	idx, err := e.prompter.Select(ctx, promptLabel(step), labels, opts...)
-	if err != nil {
-		return nil, err
-	}
-	if canGoBack && idx == len(choices) {
-		return nil, errGoBack
-	}
-	return choices[idx].Value, nil
-}
-
-func (e *Engine) promptMultiSelect(ctx context.Context, step Step, choices []Choice, canGoBack bool) (any, error) {
-	labels := choiceLabels(choices)
-	if canGoBack {
-		labels = append(labels, backLabel)
-	}
-	var opts []tui.MultiSelectOption
-	if step.Required {
-		opts = append(opts, tui.WithMinSelections(1))
-	}
-	if step.Default != nil {
-		col := e.store.Collected()
-		if defVals, ok := step.Default(col).([]string); ok && len(defVals) > 0 {
-			valSet := make(map[string]bool, len(defVals))
-			for _, v := range defVals {
-				valSet[v] = true
-			}
-			var defaults []int
-			for i, c := range choices {
-				if valSet[c.Value] {
-					defaults = append(defaults, i)
-				}
-			}
-			if len(defaults) > 0 {
-				opts = append(opts, tui.WithMultiSelectDefaults(defaults))
-			}
-		}
-	}
-	indices, err := e.prompter.MultiSelect(ctx, promptLabel(step), labels, opts...)
-	if err != nil {
-		return nil, err
-	}
-	for _, idx := range indices {
-		if canGoBack && idx == len(choices) {
-			return nil, errGoBack
-		}
-	}
-	values := make([]string, len(indices))
-	for i, idx := range indices {
-		values[i] = choices[idx].Value
-	}
-	return values, nil
-}
-
-func (e *Engine) promptTextInput(ctx context.Context, step Step) (any, error) {
-	var opts []tui.TextInputOption
-	if step.Default != nil {
-		col := e.store.Collected()
-		if d, ok := step.Default(col).(string); ok && d != "" {
-			opts = append(opts, tui.WithDefault(d))
-		}
-	}
-	return e.prompter.TextInput(ctx, promptLabel(step), opts...)
-}
-
-func (e *Engine) promptConfirm(ctx context.Context, step Step) (any, error) {
-	var opts []tui.ConfirmOption
-	if step.Default != nil {
-		col := e.store.Collected()
-		if d, ok := step.Default(col).(bool); ok {
-			opts = append(opts, tui.WithConfirmDefault(d))
-		}
-	}
-	return e.prompter.Confirm(ctx, promptLabel(step), opts...)
-}
-
-// --- Rendering ---
-
-// renderViews outputs view renders that changed since the last call.
-func (e *Engine) renderViews() {
-	for _, output := range e.bus.RenderChanged() {
-		if output != "" {
-			_, _ = fmt.Fprint(e.out(), output)
-		}
-	}
+	return true // stay
 }
 
 // --- Utilities ---

@@ -1,7 +1,6 @@
 package wizard
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -11,6 +10,15 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 	tuitesting "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 )
+
+// newTestEngine creates an engine with a resultOverride channel for unit testing.
+// This bypasses the composite model — results are read directly from the channel.
+func newTestEngine(results []promptResult, opts ...EngineOption) *Engine {
+	p := tuitesting.New()
+	e := NewEngine(p, nil, opts...)
+	e.resultOverride = testResultCh(results...)
+	return e
+}
 
 func TestEngine_HappyPath_AllStepsPrompted(t *testing.T) {
 	var region, gpu string
@@ -47,9 +55,7 @@ func TestEngine_HappyPath_AllStepsPrompted(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().AddSelect(0).AddSelect(0)
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine([]promptResult{selectResult(0), selectResult(0)})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -79,9 +85,7 @@ func TestEngine_SkipAlreadySet(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New()
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine(nil) // no prompting needed
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -115,9 +119,7 @@ func TestEngine_ShouldSkip(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine([]promptResult{selectResult(0)})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -143,9 +145,7 @@ func TestEngine_TextInput(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().AddTextInput("custom-host")
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine([]promptResult{textResult("custom-host")})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -175,9 +175,7 @@ func TestEngine_MultiSelect(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().AddMultiSelect([]int{0, 2})
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine([]promptResult{multiSelectResult([]int{0, 2})})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -202,9 +200,7 @@ func TestEngine_Confirm(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().AddConfirm(true)
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine([]promptResult{confirmResult(true)})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -229,9 +225,7 @@ func TestEngine_Password(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().AddPassword("secret-123")
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine([]promptResult{passwordResult("secret-123")})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -257,9 +251,7 @@ func TestEngine_DefaultUsedForOptional(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().AddTextInput("")
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine([]promptResult{textResult("")})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -304,9 +296,11 @@ func TestEngine_BackNavigation_EmptyRequired(t *testing.T) {
 
 	// First: select FIN-01 (idx 0) → gpu empty → auto-back
 	// Second: select SWE-01 (idx 1) → gpu has A100 → select idx 0
-	p := tuitesting.New().AddSelect(0).AddSelect(1).AddSelect(0)
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine([]promptResult{
+		selectResult(0), // region: Finland
+		selectResult(1), // region: Sweden (after auto-back)
+		selectResult(0), // gpu: A100
+	})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -335,9 +329,7 @@ func TestEngine_EmptyRequired_AtFirstStep_ReturnsError(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New()
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine(nil)
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
 		t.Fatal("expected error when first step has no options")
@@ -366,9 +358,10 @@ func TestEngine_ValidationError_RepromptsUntilValid(t *testing.T) {
 	}
 
 	// First: "bad" (fails validation, re-prompt), second: "100" (passes)
-	p := tuitesting.New().AddTextInput("bad").AddTextInput("100")
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine([]promptResult{
+		textResult("bad"),
+		textResult("100"),
+	}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -397,9 +390,7 @@ func TestEngine_CachesLoaderResults(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine([]promptResult{selectResult(0)})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -505,17 +496,16 @@ func TestEngine_FullFlow_VMCreate(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().
-		AddSelect(0).                // on-demand
-		AddSelect(0).                // pay as you go
-		AddSelect(0).                // GPU
-		AddSelect(0).                // H100
-		AddSelect(0).                // FIN-01
-		AddSelect(0).                // Ubuntu
-		AddMultiSelect([]int{0, 1}). // both SSH keys
-		AddTextInput("my-vm")        // hostname
-
-	engine := NewEngine(p, nil)
+	engine := newTestEngine([]promptResult{
+		selectResult(0),                // on-demand
+		selectResult(0),                // pay as you go
+		selectResult(0),                // GPU
+		selectResult(0),                // H100
+		selectResult(0),                // FIN-01
+		selectResult(0),                // Ubuntu
+		multiSelectResult([]int{0, 1}), // both SSH keys
+		textResult("my-vm"),            // hostname
+	})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -581,13 +571,12 @@ func TestEngine_UserInitiatedBack(t *testing.T) {
 	// Step 2: select "← Back" (idx 2 = last, after h100 and a100)
 	// Step 1 again: select Sweden (idx 1)
 	// Step 2 again: select A100 (idx 1)
-	p := tuitesting.New().
-		AddSelect(0). // region: Finland
-		AddSelect(2). // gpu: ← Back
-		AddSelect(1). // region: Sweden
-		AddSelect(1)  // gpu: A100
-
-	engine := NewEngine(p, nil)
+	engine := newTestEngine([]promptResult{
+		selectResult(0), // region: Finland
+		selectResult(2), // gpu: ← Back
+		selectResult(1), // region: Sweden
+		selectResult(1), // gpu: A100
+	})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -600,10 +589,97 @@ func TestEngine_UserInitiatedBack(t *testing.T) {
 	}
 }
 
+func TestEngine_EscBack(t *testing.T) {
+	// Esc (ActionBack) should navigate to the prior editable step.
+	var region, gpu string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "Finland", Value: "FIN-01"},
+					Choice{Label: "Sweden", Value: "SWE-01"},
+				),
+				Setter: func(v any) { region = v.(string) },
+			},
+			{
+				Name:     "gpu",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: StaticChoices(
+					Choice{Label: "H100", Value: "h100"},
+					Choice{Label: "A100", Value: "a100"},
+				),
+				Setter: func(v any) { gpu = v.(string) },
+			},
+		},
+	}
+
+	engine := newTestEngine([]promptResult{
+		selectResult(0), // region: Finland
+		backResult(),    // gpu: Esc → back to region
+		selectResult(1), // region: Sweden
+		selectResult(1), // gpu: A100
+	})
+	err := engine.Run(context.Background(), flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if region != "SWE-01" {
+		t.Errorf("expected region 'SWE-01', got %q", region)
+	}
+	if gpu != "a100" {
+		t.Errorf("expected gpu 'a100', got %q", gpu)
+	}
+}
+
+func TestEngine_EscOnFirstStep_Cancels(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "first",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "A", Value: "a"}),
+				Setter:   func(v any) {},
+			},
+		},
+	}
+
+	engine := newTestEngine([]promptResult{backResult()})
+	err := engine.Run(context.Background(), flow)
+	if err == nil || !strings.Contains(err.Error(), "wizard cancelled") {
+		t.Fatalf("expected 'wizard cancelled', got %v", err)
+	}
+}
+
+func TestEngine_CtrlC_Exits(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "first",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "A", Value: "a"}),
+				Setter:   func(v any) {},
+			},
+		},
+	}
+
+	engine := newTestEngine([]promptResult{exitResult()})
+	err := engine.Run(context.Background(), flow)
+	if err == nil || !strings.Contains(err.Error(), "wizard cancelled") {
+		t.Fatalf("expected 'wizard cancelled', got %v", err)
+	}
+}
+
 func TestEngine_BackNotShownOnFirstStep(t *testing.T) {
-	// First step has 2 choices. If "← Back" were added, index 2 would be valid.
-	// Since it's the first step, "← Back" should NOT be added, so index 2 is out of bounds.
-	// We select index 0 which should work fine.
 	var val string
 
 	flow := &Flow{
@@ -622,9 +698,7 @@ func TestEngine_BackNotShownOnFirstStep(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine([]promptResult{selectResult(0)})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -650,9 +724,10 @@ func TestEngine_RequiredTextInput_RepromptsOnEmpty(t *testing.T) {
 	}
 
 	// First: empty (re-prompt), second: valid
-	p := tuitesting.New().AddTextInput("").AddTextInput("my-service")
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine([]promptResult{
+		textResult(""),
+		textResult("my-service"),
+	}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -663,8 +738,6 @@ func TestEngine_RequiredTextInput_RepromptsOnEmpty(t *testing.T) {
 }
 
 func TestEngine_DependencyAwareAutoBack(t *testing.T) {
-	// Flow: region(select) -> name(text) -> gpu(select, depends on region)
-	// When gpu is empty for region=A, should back to region (not name).
 	var region, name, gpu string
 
 	flow := &Flow{
@@ -703,20 +776,13 @@ func TestEngine_DependencyAwareAutoBack(t *testing.T) {
 		},
 	}
 
-	// 1: region=A (idx 0)
-	// 2: name="test"
-	// 3: gpu empty → auto-back to region (skips name!)
-	// 4: region=B (idx 1)
-	// 5: name="test2"
-	// 6: gpu=H100 (idx 0)
-	p := tuitesting.New().
-		AddSelect(0).          // region: A
-		AddTextInput("test").  // name
-		AddSelect(1).          // region: B (after dependency-aware back)
-		AddTextInput("test2"). // name again
-		AddSelect(0)           // gpu: H100
-
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
+	engine := newTestEngine([]promptResult{
+		selectResult(0),     // region: A
+		textResult("test"),  // name
+		selectResult(1),     // region: B (after dependency-aware auto-back)
+		textResult("test2"), // name again
+		selectResult(0),     // gpu: H100
+	}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -732,7 +798,7 @@ func TestEngine_DependencyAwareAutoBack(t *testing.T) {
 	}
 }
 
-func TestEngine_NilSetter_NosPanic(t *testing.T) {
+func TestEngine_NilSetter_NoPanic(t *testing.T) {
 	flow := &Flow{
 		Name: "test",
 		Steps: []Step{
@@ -746,9 +812,7 @@ func TestEngine_NilSetter_NosPanic(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine([]promptResult{selectResult(0)})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -788,14 +852,11 @@ func TestEngine_ResetterCalledOnBack(t *testing.T) {
 		},
 	}
 
-	// 1: on-demand (idx 0) → contract shows → monthly (idx 0)
-	// Then flow completes with contract="monthly"
-	// Now test: pick on-demand, pick contract, go back, pick spot → contract should be reset
-	p := tuitesting.New().
-		AddSelect(0). // category: on-demand
-		AddSelect(0)  // contract: monthly
-
-	engine := NewEngine(p, nil)
+	// First run: on-demand → monthly
+	engine := newTestEngine([]promptResult{
+		selectResult(0), // category: on-demand
+		selectResult(0), // contract: monthly
+	})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -804,14 +865,13 @@ func TestEngine_ResetterCalledOnBack(t *testing.T) {
 		t.Errorf("expected 'monthly', got %q", contract)
 	}
 
-	// Second run: pick on-demand, then go back from contract, pick spot → contract skipped & reset
-	contract = "stale-value" // simulate stale state
-	p2 := tuitesting.New().
-		AddSelect(0). // category: on-demand
-		AddSelect(1). // contract: ← Back
-		AddSelect(1)  // category: spot (contract will be skipped)
-
-	engine2 := NewEngine(p2, nil)
+	// Second run: on-demand, then go back from contract, pick spot → contract skipped & reset
+	contract = "stale-value"
+	engine2 := newTestEngine([]promptResult{
+		selectResult(0), // category: on-demand
+		selectResult(1), // contract: ← Back
+		selectResult(1), // category: spot (contract will be skipped)
+	})
 	err = engine2.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -819,9 +879,6 @@ func TestEngine_ResetterCalledOnBack(t *testing.T) {
 	if category != "spot" {
 		t.Errorf("expected 'spot', got %q", category)
 	}
-	// contract Resetter should NOT have been called by engine2 since it was never set in this run.
-	// But the Setter was never called either, so contract keeps the "stale-value" from before.
-	// The key point: engine2.Collected() should NOT have "contract".
 	if _, exists := engine2.Collected()["contract"]; exists {
 		t.Error("contract should not be in collected — step was skipped")
 	}
@@ -862,17 +919,14 @@ func TestEngine_SkipClearsStaleValue(t *testing.T) {
 		},
 	}
 
-	// Pick on-demand → contract=monthly → done
-	// Then go back from done to contract, back to category, pick spot → contract should be reset
-	p := tuitesting.New().
-		AddSelect(0). // category: on-demand
-		AddSelect(0). // contract: monthly
-		AddSelect(1). // done: ← Back
-		AddSelect(1). // contract: ← Back
-		AddSelect(1). // category: spot (contract skipped, resetter called)
-		AddSelect(0)  // done: OK
-
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
+	engine := newTestEngine([]promptResult{
+		selectResult(0), // category: on-demand
+		selectResult(0), // contract: monthly
+		selectResult(1), // done: ← Back
+		selectResult(1), // contract: ← Back
+		selectResult(1), // category: spot (contract skipped, resetter called)
+		selectResult(0), // done: OK
+	}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -902,16 +956,14 @@ func TestEngine_FixedDependency_ReturnsError(t *testing.T) {
 				Required:  true,
 				DependsOn: []string{"region"},
 				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
-					return []Choice{}, nil // always empty
+					return []Choice{}, nil
 				},
 				Setter: func(v any) {},
 			},
 		},
 	}
 
-	p := tuitesting.New()
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine(nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
 		t.Fatal("expected error for fixed dependency with empty choices")
@@ -930,16 +982,14 @@ func TestEngine_OptionalEmptyChoices_SkipsWithDefault(t *testing.T) {
 				Required: false,
 				Default:  func(_ map[string]any) any { return "none" },
 				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
-					return []Choice{}, nil // empty
+					return []Choice{}, nil
 				},
 				Setter: func(v any) { addon = v.(string) },
 			},
 		},
 	}
 
-	p := tuitesting.New() // no prompts queued — step should be auto-skipped
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine(nil)
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -950,7 +1000,6 @@ func TestEngine_OptionalEmptyChoices_SkipsWithDefault(t *testing.T) {
 }
 
 func TestEngine_IsSetPropagatesValueToCollected(t *testing.T) {
-	// When IsSet is true and Value is provided, downstream loaders should see it.
 	var gpu string
 	fixedRegion := "FIN-01"
 
@@ -972,7 +1021,6 @@ func TestEngine_IsSetPropagatesValueToCollected(t *testing.T) {
 				DependsOn: []string{"region"},
 				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
 					c := store.Collected()
-					// This should see region in collected.
 					if c["region"] != "FIN-01" {
 						t.Errorf("expected region 'FIN-01' in collected, got %v", c["region"])
 					}
@@ -983,9 +1031,7 @@ func TestEngine_IsSetPropagatesValueToCollected(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().AddSelect(0) // gpu: H100
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine([]promptResult{selectResult(0)})
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -999,8 +1045,6 @@ func TestEngine_IsSetPropagatesValueToCollected(t *testing.T) {
 }
 
 func TestEngine_MixedFixedEditableDependencies(t *testing.T) {
-	// gpu depends on both region (fixed) and category (editable).
-	// When gpu has no choices, should back to category (not error on region).
 	var category, gpu string
 
 	flow := &Flow{
@@ -1031,7 +1075,7 @@ func TestEngine_MixedFixedEditableDependencies(t *testing.T) {
 				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
 					c := store.Collected()
 					if c["category"] == "GPU" {
-						return []Choice{}, nil // empty for GPU
+						return []Choice{}, nil
 					}
 					return []Choice{{Label: "32 vCPU", Value: "32cpu"}}, nil
 				},
@@ -1040,14 +1084,11 @@ func TestEngine_MixedFixedEditableDependencies(t *testing.T) {
 		},
 	}
 
-	// 1: category=GPU → gpu empty → auto-back to category (not error on fixed region)
-	// 2: category=CPU → gpu=32cpu
-	p := tuitesting.New().
-		AddSelect(0). // category: GPU
-		AddSelect(1). // category: CPU (after auto-back)
-		AddSelect(0)  // gpu: 32cpu
-
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
+	engine := newTestEngine([]promptResult{
+		selectResult(0), // category: GPU
+		selectResult(1), // category: CPU (after auto-back)
+		selectResult(0), // gpu: 32cpu
+	}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1070,7 +1111,6 @@ func TestEngine_OptionalEmptyNoDefault_Resets(t *testing.T) {
 				Name:     "addon",
 				Prompt:   SelectPrompt,
 				Required: false,
-				// No Default — should reset stale value
 				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
 					return []Choice{}, nil
 				},
@@ -1080,9 +1120,7 @@ func TestEngine_OptionalEmptyNoDefault_Resets(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New()
-	engine := NewEngine(p, nil)
-
+	engine := newTestEngine(nil)
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1093,9 +1131,6 @@ func TestEngine_OptionalEmptyNoDefault_Resets(t *testing.T) {
 }
 
 func TestEngine_SkippedDepNotPickedByAutoBack(t *testing.T) {
-	// Flow: A(select) -> B(select, skipped when A=x, dependsOn A) -> C(select, dependsOn B)
-	// When C has no choices and B is currently skipped, auto-back should
-	// go to A (not B), avoiding an infinite loop.
 	var a, c string
 
 	flow := &Flow{
@@ -1128,7 +1163,7 @@ func TestEngine_SkippedDepNotPickedByAutoBack(t *testing.T) {
 				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
 					col := store.Collected()
 					if col["b"] == nil {
-						return []Choice{}, nil // empty when B is skipped
+						return []Choice{}, nil
 					}
 					return []Choice{{Label: "C1", Value: "c1"}}, nil
 				},
@@ -1137,15 +1172,12 @@ func TestEngine_SkippedDepNotPickedByAutoBack(t *testing.T) {
 		},
 	}
 
-	// 1: A=X → B skipped → C empty → auto-back should go to A (not B)
-	// 2: A=Y → B=B1 → C=C1
-	p := tuitesting.New().
-		AddSelect(0). // A: X
-		AddSelect(1). // A: Y (after auto-back past skipped B)
-		AddSelect(0). // B: B1
-		AddSelect(0)  // C: C1
-
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
+	engine := newTestEngine([]promptResult{
+		selectResult(0), // A: X
+		selectResult(1), // A: Y (after auto-back past skipped B)
+		selectResult(0), // B: B1
+		selectResult(0), // C: C1
+	}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1158,102 +1190,7 @@ func TestEngine_SkippedDepNotPickedByAutoBack(t *testing.T) {
 	}
 }
 
-func TestEngine_EscOnTextInputGoesBack(t *testing.T) {
-	// Esc on a TextInput (returns context.Canceled) should go back, not abort.
-	var region, name string
-
-	flow := &Flow{
-		Name: "test",
-		Steps: []Step{
-			{
-				Name:     "region",
-				Prompt:   SelectPrompt,
-				Required: true,
-				Loader: StaticChoices(
-					Choice{Label: "A", Value: "a"},
-					Choice{Label: "B", Value: "b"},
-				),
-				Setter: func(v any) { region = v.(string) },
-			},
-			{
-				Name:     "name",
-				Prompt:   TextInputPrompt,
-				Required: true,
-				Setter:   func(v any) { name = v.(string) },
-			},
-		},
-	}
-
-	// The testing prompter doesn't support context.Canceled directly,
-	// so we test the engine logic by verifying the error handling path.
-	// Queue: region=A, then name returns context.Canceled (simulated via empty queue error),
-	// but since testing.Prompter returns a different error, let's test with a custom prompter.
-
-	// Instead, verify the logic by testing that context.Canceled from a real cancel works.
-	// Use a cancelled context to trigger the path.
-	cancelCtx, cancel := context.WithCancel(context.Background())
-
-	// Queue region selection, then cancel before name prompt.
-	p := tuitesting.New().AddSelect(0) // region: A
-	// Don't queue text input — it will error with "no text input responses queued"
-
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-	err := engine.Run(cancelCtx, flow)
-
-	// The test prompter returns a non-context.Canceled error, so this will be a fatal error.
-	// That's fine — the real test is that context.Canceled specifically triggers back.
-	// Let's verify with a proper cancel.
-	cancel()
-	_ = region
-	_ = name
-	_ = err
-	// The P2 fix is verified by the code path — context.Canceled is now handled.
-	// A full integration test would need a real bubbletea prompter.
-	// For unit testing, verify the engine doesn't panic and handles the error.
-}
-
-func TestEngine_CancelledContextOnFirstStepAborts(t *testing.T) {
-	// On the first step, context.Canceled should abort the wizard.
-	// The testing prompter doesn't check context, so we verify the code path
-	// by ensuring context.Canceled errors from prompter are handled correctly.
-	// This is a code-path verification — full integration needs real bubbletea.
-
-	// Verify the engine handles the error path: if prompt returns context.Canceled
-	// on step 0, it should return "wizard cancelled".
-	flow := &Flow{
-		Name: "test",
-		Steps: []Step{
-			{
-				Name:     "first",
-				Prompt:   SelectPrompt,
-				Required: true,
-				Loader:   StaticChoices(Choice{Label: "A", Value: "a"}),
-				Setter:   func(v any) {},
-			},
-			{
-				Name:     "second",
-				Prompt:   SelectPrompt,
-				Required: true,
-				Loader:   StaticChoices(Choice{Label: "B", Value: "b"}),
-				Setter:   func(v any) {},
-			},
-		},
-	}
-
-	// Select first step normally, then the test prompter will fail on second
-	// with "no select responses queued" — that's a non-context error, which is fatal.
-	// This verifies the engine propagates fatal errors correctly.
-	p := tuitesting.New().AddSelect(0) // only first step
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
-	err := engine.Run(context.Background(), flow)
-	if err == nil {
-		t.Fatal("expected error when prompter has no responses")
-	}
-}
-
 func TestEngine_ShouldSkipOverridesIsSet(t *testing.T) {
-	// P1: If a step is both IsSet and ShouldSkip, ShouldSkip wins — value is cleared.
 	var tls bool
 	tlsSet := true
 
@@ -1280,10 +1217,7 @@ func TestEngine_ShouldSkipOverridesIsSet(t *testing.T) {
 		},
 	}
 
-	// env=dev → tls should be skipped and reset, even though IsSet=true
-	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine([]promptResult{selectResult(0)}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1297,9 +1231,6 @@ func TestEngine_ShouldSkipOverridesIsSet(t *testing.T) {
 }
 
 func TestEngine_BackNotShownWhenAllPriorFixed(t *testing.T) {
-	// P3: "← Back" should not appear when all prior steps are fixed/skipped.
-	// If it did, selecting index 1 (← Back) would be valid. With 1 choice + no back,
-	// only index 0 is valid.
 	var val string
 	fixedFirst := true
 
@@ -1324,10 +1255,7 @@ func TestEngine_BackNotShownWhenAllPriorFixed(t *testing.T) {
 		},
 	}
 
-	// Only 1 choice ("A") since "← Back" should NOT be shown (no editable prior step).
-	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine([]promptResult{selectResult(0)}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1338,9 +1266,6 @@ func TestEngine_BackNotShownWhenAllPriorFixed(t *testing.T) {
 }
 
 func TestEngine_SkippedDepChainRewindsToController(t *testing.T) {
-	// P2: Flow: env(select) -> svc-name(text) -> tls(skipped for dev) -> cert(dependsOn tls, empty)
-	// cert has no choices when tls is skipped. Auto-back should go to env (which controls the skip),
-	// not to svc-name (which is unrelated).
 	var env, svcName string
 
 	flow := &Flow{
@@ -1378,7 +1303,7 @@ func TestEngine_SkippedDepChainRewindsToController(t *testing.T) {
 				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, store *Store) ([]Choice, error) {
 					c := store.Collected()
 					if _, hasTLS := c["tls"]; !hasTLS {
-						return []Choice{}, nil // no certs when TLS is skipped
+						return []Choice{}, nil
 					}
 					return []Choice{{Label: "wildcard.pem", Value: "wildcard"}}, nil
 				},
@@ -1387,19 +1312,14 @@ func TestEngine_SkippedDepChainRewindsToController(t *testing.T) {
 		},
 	}
 
-	// 1: env=dev, svc-name="myapp" → tls skipped → cert empty
-	//    → auto-back to env (nearest editable before skipped dep tls)
-	//    → resets env, svc-name, tls, cert
-	// 2: env=prod, svc-name="myapp2" → tls=yes → cert=wildcard
-	p := tuitesting.New().
-		AddSelect(0).           // env: dev
-		AddTextInput("myapp").  // svc-name
-		AddSelect(1).           // env: prod (after auto-back to earliest editable = env)
-		AddTextInput("myapp2"). // svc-name again (was reset)
-		AddConfirm(true).       // tls: yes (not skipped for prod)
-		AddSelect(0)            // cert: wildcard
-
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
+	engine := newTestEngine([]promptResult{
+		selectResult(0),      // env: dev
+		textResult("myapp"),  // svc-name
+		selectResult(1),      // env: prod (after auto-back to earliest editable = env)
+		textResult("myapp2"), // svc-name again (was reset)
+		confirmResult(true),  // tls: yes (not skipped for prod)
+		selectResult(0),      // cert: wildcard
+	}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1432,9 +1352,7 @@ func TestEngine_PresetValueValidated(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New()
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine(nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
 		t.Fatal("expected validation error for preset value")
@@ -1458,8 +1376,7 @@ func TestEngine_RunClearsStateFromPreviousRun(t *testing.T) {
 	}
 
 	// First run: select A
-	p1 := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p1, nil, WithOutput(io.Discard))
+	engine := newTestEngine([]promptResult{selectResult(0)}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("run 1: %v", err)
@@ -1469,8 +1386,7 @@ func TestEngine_RunClearsStateFromPreviousRun(t *testing.T) {
 	}
 
 	// Second run with same engine: select B
-	// Engine must use a new prompter since the old one is exhausted.
-	engine.prompter = tuitesting.New().AddSelect(1)
+	engine.resultOverride = testResultCh(selectResult(1))
 	err = engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("run 2: %v", err)
@@ -1478,14 +1394,12 @@ func TestEngine_RunClearsStateFromPreviousRun(t *testing.T) {
 	if val != "b" {
 		t.Errorf("run 2: expected 'b', got %q", val)
 	}
-	// Collected should only have run 2's values.
 	if engine.Collected()["item"] != "b" {
 		t.Errorf("collected should be 'b', got %v", engine.Collected()["item"])
 	}
 }
 
 func TestEngine_SkippedDepsNoRewindTarget_ReturnsError(t *testing.T) {
-	// All prior steps are fixed/skipped, dep is skipped → should error, not loop.
 	flow := &Flow{
 		Name: "test",
 		Steps: []Step{
@@ -1516,9 +1430,7 @@ func TestEngine_SkippedDepsNoRewindTarget_ReturnsError(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New()
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine(nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
 		t.Fatal("expected error when no rewind target exists")
@@ -1526,8 +1438,6 @@ func TestEngine_SkippedDepsNoRewindTarget_ReturnsError(t *testing.T) {
 }
 
 func TestEngine_BackSkipsAutoSkippedOptional(t *testing.T) {
-	// Flow: A(select) -> B(optional select, empty loader) -> C(select)
-	// Back from C should skip B (auto-skipped) and land on A.
 	var a, c string
 
 	flow := &Flow{
@@ -1565,15 +1475,12 @@ func TestEngine_BackSkipsAutoSkippedOptional(t *testing.T) {
 		},
 	}
 
-	// 1: A=A1, B auto-skipped, C: select ← Back (idx 2)
-	// 2: A=A2, B auto-skipped, C=C1 (idx 0)
-	p := tuitesting.New().
-		AddSelect(0). // A: A1
-		AddSelect(2). // C: ← Back (skips past auto-skipped B to A)
-		AddSelect(1). // A: A2
-		AddSelect(0)  // C: C1
-
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
+	engine := newTestEngine([]promptResult{
+		selectResult(0), // A: A1
+		selectResult(2), // C: ← Back (skips past auto-skipped B to A)
+		selectResult(1), // A: A2
+		selectResult(0), // C: C1
+	}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1587,10 +1494,6 @@ func TestEngine_BackSkipsAutoSkippedOptional(t *testing.T) {
 }
 
 func TestEngine_ConfirmDefaultHonored(t *testing.T) {
-	// Confirm prompt with Default=true should pass true as the default.
-	// The test prompter's Confirm always returns the queued value,
-	// but we verify the engine wires defaults correctly by checking
-	// that the flow works with the default value.
 	var tls bool
 
 	flow := &Flow{
@@ -1606,10 +1509,7 @@ func TestEngine_ConfirmDefaultHonored(t *testing.T) {
 		},
 	}
 
-	// Queue true — matches the default.
-	p := tuitesting.New().AddConfirm(true)
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine([]promptResult{confirmResult(true)}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1620,9 +1520,6 @@ func TestEngine_ConfirmDefaultHonored(t *testing.T) {
 }
 
 func TestEngine_AutoSkippedDepNotRewindTarget(t *testing.T) {
-	// Flow: addon(optional, empty loader) -> addon-config(required, dependsOn addon, empty)
-	// addon is auto-skipped. addon-config has no choices.
-	// Should error, not loop to auto-skipped addon.
 	flow := &Flow{
 		Name: "test",
 		Steps: []Step{
@@ -1648,9 +1545,7 @@ func TestEngine_AutoSkippedDepNotRewindTarget(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New()
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine(nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
 		t.Fatal("expected error, not infinite loop")
@@ -1658,7 +1553,6 @@ func TestEngine_AutoSkippedDepNotRewindTarget(t *testing.T) {
 }
 
 func TestEngine_NameFallbackWhenDescriptionEmpty(t *testing.T) {
-	// Step with no Description should use Name in prompts without panicking.
 	var val string
 
 	flow := &Flow{
@@ -1668,16 +1562,13 @@ func TestEngine_NameFallbackWhenDescriptionEmpty(t *testing.T) {
 				Name:     "region",
 				Prompt:   SelectPrompt,
 				Required: true,
-				// Description intentionally empty
-				Loader: StaticChoices(Choice{Label: "A", Value: "a"}),
-				Setter: func(v any) { val = v.(string) },
+				Loader:   StaticChoices(Choice{Label: "A", Value: "a"}),
+				Setter:   func(v any) { val = v.(string) },
 			},
 		},
 	}
 
-	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine([]promptResult{selectResult(0)}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1688,9 +1579,6 @@ func TestEngine_NameFallbackWhenDescriptionEmpty(t *testing.T) {
 }
 
 func TestEngine_SelectDefaultForwarded(t *testing.T) {
-	// Default on SelectPrompt should forward to the prompter.
-	// The test prompter ignores defaults (returns queued index), but
-	// we verify the engine doesn't error and the flow completes.
 	var val string
 
 	flow := &Flow{
@@ -1711,10 +1599,7 @@ func TestEngine_SelectDefaultForwarded(t *testing.T) {
 		},
 	}
 
-	// Select index 1 (medium — matches default).
-	p := tuitesting.New().AddSelect(1)
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine([]promptResult{selectResult(1)}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1725,7 +1610,6 @@ func TestEngine_SelectDefaultForwarded(t *testing.T) {
 }
 
 func TestEngine_GoBackClearsDownstreamCollected(t *testing.T) {
-	// A -> B -> C. Back from C should clear both B and C from collected.
 	var a, b, c string
 
 	flow := &Flow{
@@ -1754,17 +1638,13 @@ func TestEngine_GoBackClearsDownstreamCollected(t *testing.T) {
 		},
 	}
 
-	// 1: A=A1, B="hello", C: ← Back → clears B and lands on B
-	// But goBack from C skips to B (text), so B and C should both be cleared
-	// 2: B="world", C=C1
-	p := tuitesting.New().
-		AddSelect(0).          // A: A1
-		AddTextInput("hello"). // B: hello
-		AddSelect(1).          // C: ← Back
-		AddTextInput("world"). // B: world
-		AddSelect(0)           // C: C1
-
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
+	engine := newTestEngine([]promptResult{
+		selectResult(0),     // A: A1
+		textResult("hello"), // B: hello
+		selectResult(1),     // C: ← Back
+		textResult("world"), // B: world
+		selectResult(0),     // C: C1
+	}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1781,8 +1661,6 @@ func TestEngine_GoBackClearsDownstreamCollected(t *testing.T) {
 }
 
 func TestEngine_SkippedDepWithFixedController_ErrorsNotLoops(t *testing.T) {
-	// env(fixed=dev) -> tls(skipped when env=dev) -> cert(dependsOn tls, empty)
-	// svc-name is editable but can't change env → should error, not loop to svc-name.
 	flow := &Flow{
 		Name: "test",
 		Steps: []Step{
@@ -1819,182 +1697,100 @@ func TestEngine_SkippedDepWithFixedController_ErrorsNotLoops(t *testing.T) {
 		},
 	}
 
-	// Queue enough text inputs for the rewind guard to kick in.
-	p := tuitesting.New().
-		AddTextInput("svc1").
-		AddTextInput("svc2").
-		AddTextInput("svc3").
-		AddTextInput("svc4")
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine([]promptResult{
+		textResult("svc1"),
+		textResult("svc2"),
+		textResult("svc3"),
+		textResult("svc4"),
+	}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err == nil {
 		t.Fatal("expected error, not infinite loop")
 	}
 }
 
-// --- Progress bar tests ---
+func TestEngine_IsEditable_FixedVsIsSet(t *testing.T) {
+	var region, env, gpu string
 
-func TestEngine_ProgressBarCountsOnlyVisibleSteps(t *testing.T) {
 	flow := &Flow{
 		Name: "test",
 		Steps: []Step{
 			{
-				Name:   "a",
-				Prompt: TextInputPrompt,
-				Setter: func(v any) {},
-			},
-			{
-				Name:   "b",
-				Prompt: TextInputPrompt,
-				IsSet:  func() bool { return true },
-				Value:  func() any { return "preset" },
-				Setter: func(v any) {},
-			},
-			{
-				Name:       "c",
-				Prompt:     TextInputPrompt,
-				ShouldSkip: func(_ map[string]any) bool { return true },
-				Setter:     func(v any) {},
-			},
-			{
-				Name:   "d",
-				Prompt: TextInputPrompt,
-				Setter: func(v any) {},
-			},
-		},
-	}
-
-	p := tuitesting.New().AddTextInput("val-a").AddTextInput("val-d")
-	var buf bytes.Buffer
-	engine := NewEngine(p, nil, WithOutput(&buf))
-
-	err := engine.Run(context.Background(), flow)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	output := buf.String()
-	// Absolute position: step "a" is 1 of 4, step "d" is 4 of 4
-	if !strings.Contains(output, "Step 1 of 4") {
-		t.Errorf("expected 'Step 1 of 4' in output, got:\n%s", output)
-	}
-	if !strings.Contains(output, "Step 4 of 4") {
-		t.Errorf("expected 'Step 4 of 4' in output, got:\n%s", output)
-	}
-}
-
-func TestEngine_ProgressBarWithBackNavigation(t *testing.T) {
-	flow := &Flow{
-		Name: "test",
-		Steps: []Step{
-			{
-				Name:   "a",
-				Prompt: SelectPrompt,
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
 				Loader: StaticChoices(
-					Choice{Label: "X", Value: "x"},
-					Choice{Label: "Y", Value: "y"},
+					Choice{Label: "Finland", Value: "FIN-01"},
+					Choice{Label: "Sweden", Value: "SWE-01"},
 				),
-				Setter: func(v any) {},
+				Setter: func(v any) { region = v.(string) },
 			},
 			{
-				Name:   "b",
-				Prompt: SelectPrompt,
+				Name:     "env",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "Prod", Value: "prod"}),
+				Setter:   func(v any) { env = v.(string) },
+				IsSet:    func() bool { return true },
+				Value:    func() any { return "prod" },
+			},
+			{
+				Name:     "gpu",
+				Prompt:   SelectPrompt,
+				Required: true,
 				Loader: StaticChoices(
-					Choice{Label: "M", Value: "m"},
-					Choice{Label: "N", Value: "n"},
+					Choice{Label: "H100", Value: "h100"},
+					Choice{Label: "A100", Value: "a100"},
 				),
-				Setter: func(v any) {},
+				Setter: func(v any) { gpu = v.(string) },
 			},
 		},
 	}
 
-	p := tuitesting.New().
-		AddSelect(0). // step a: select X
-		AddSelect(2). // step b: select "← Back"
-		AddSelect(1). // step a again: select Y
-		AddSelect(0)  // step b: select M
-	var buf bytes.Buffer
-	engine := NewEngine(p, nil, WithOutput(&buf))
-
+	engine := newTestEngine([]promptResult{
+		selectResult(0), // region: Finland
+		selectResult(2), // gpu: ← Back (skips fixed env, goes to region)
+		selectResult(1), // region: Sweden
+		selectResult(1), // gpu: A100
+	}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	output := buf.String()
-	// Each step renders the progress bar exactly once (via RenderChanged).
-	// Step 1 appears twice: initial prompt + back navigation re-prompt.
-	// Step 2 appears twice: initial prompt + second prompt after back.
-	count1 := strings.Count(output, "Step 1 of 2")
-	count2 := strings.Count(output, "Step 2 of 2")
-	if count1 != 2 {
-		t.Errorf("expected 'Step 1 of 2' to appear 2 times, got %d\noutput:\n%s", count1, output)
+	if region != "SWE-01" {
+		t.Errorf("expected region 'SWE-01', got %q", region)
 	}
-	if count2 != 2 {
-		t.Errorf("expected 'Step 2 of 2' to appear 2 times, got %d\noutput:\n%s", count2, output)
+	if env != "prod" {
+		t.Errorf("expected env 'prod', got %q", env)
+	}
+	if gpu != "a100" {
+		t.Errorf("expected gpu 'a100', got %q", gpu)
 	}
 }
 
-func TestEngine_SingleStepNoProgressBar(t *testing.T) {
+func TestEngine_LoaderError_Propagated(t *testing.T) {
 	flow := &Flow{
 		Name: "test",
 		Steps: []Step{
 			{
-				Name:   "only",
-				Prompt: TextInputPrompt,
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
+					return nil, fmt.Errorf("connection failed")
+				},
 				Setter: func(v any) {},
 			},
 		},
 	}
 
-	p := tuitesting.New().AddTextInput("hello")
-	var buf bytes.Buffer
-	engine := NewEngine(p, nil, WithOutput(&buf))
-
+	engine := newTestEngine(nil, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
-
-	output := buf.String()
-	if strings.Contains(output, "Step") {
-		t.Errorf("single-step flow should have no progress bar, got:\n%s", output)
-	}
-}
-
-func TestEngine_ViewLayout(t *testing.T) {
-	flow := &Flow{
-		Name: "test",
-		Layout: []ViewDef{
-			{ID: "progress", View: NewProgressView()},
-		},
-		Steps: []Step{
-			{
-				Name:   "a",
-				Prompt: TextInputPrompt,
-				Setter: func(v any) {},
-			},
-			{
-				Name:   "b",
-				Prompt: TextInputPrompt,
-				Setter: func(v any) {},
-			},
-		},
-	}
-
-	p := tuitesting.New().AddTextInput("val-a").AddTextInput("val-b")
-	var buf bytes.Buffer
-	engine := NewEngine(p, nil, WithOutput(&buf))
-
-	err := engine.Run(context.Background(), flow)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	output := buf.String()
-	if !strings.Contains(output, "Step 1 of 2") {
-		t.Errorf("expected 'Step 1 of 2' in output, got:\n%s", output)
+	if !strings.Contains(err.Error(), "connection failed") {
+		t.Errorf("expected 'connection failed' in error, got %q", err)
 	}
 }
 
@@ -2018,9 +1814,7 @@ func TestEngine_LoaderReceivesStatusAndStore(t *testing.T) {
 		},
 	}
 
-	p := tuitesting.New().AddSelect(0)
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-
+	engine := newTestEngine([]promptResult{selectResult(0)}, WithOutput(io.Discard))
 	err := engine.Run(context.Background(), flow)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2028,238 +1822,8 @@ func TestEngine_LoaderReceivesStatusAndStore(t *testing.T) {
 	if !gotStore {
 		t.Error("loader should receive non-nil store")
 	}
-
 	v, ok := engine.Store().Get("loaded")
 	if !ok || v != true {
 		t.Error("loader should be able to write to store")
-	}
-}
-
-func TestEngine_LoaderCanceled_GoesBack(t *testing.T) {
-	// When a Loader returns context.Canceled (e.g., user presses Esc in a
-	// Loader-managed sub-prompt), the wizard should navigate back to the
-	// previous editable step instead of aborting.
-	var region, gpu string
-
-	callCount := 0
-	flow := &Flow{
-		Name: "test",
-		Steps: []Step{
-			{
-				Name:     "region",
-				Prompt:   SelectPrompt,
-				Required: true,
-				Loader: StaticChoices(
-					Choice{Label: "Finland", Value: "FIN-01"},
-					Choice{Label: "Sweden", Value: "SWE-01"},
-				),
-				Setter: func(v any) { region = v.(string) },
-			},
-			{
-				Name:     "gpu",
-				Prompt:   SelectPrompt,
-				Required: true,
-				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
-					callCount++
-					if callCount == 1 {
-						// First time: simulate Esc → context.Canceled
-						return nil, context.Canceled
-					}
-					// Second time: return real choices
-					return []Choice{
-						{Label: "H100", Value: "h100"},
-						{Label: "A100", Value: "a100"},
-					}, nil
-				},
-				Setter: func(v any) { gpu = v.(string) },
-			},
-		},
-	}
-
-	// Step 1: select Finland (idx 0)
-	// Step 2: loader returns context.Canceled → back to step 1
-	// Step 1 again: select Sweden (idx 1)
-	// Step 2: loader succeeds, select H100 (idx 0)
-	p := tuitesting.New().
-		AddSelect(0). // region: Finland
-		AddSelect(1). // region (again): Sweden
-		AddSelect(0)  // gpu: H100
-
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-	err := engine.Run(context.Background(), flow)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if region != "SWE-01" {
-		t.Errorf("expected region 'SWE-01', got %q", region)
-	}
-	if gpu != "h100" {
-		t.Errorf("expected gpu 'h100', got %q", gpu)
-	}
-}
-
-func TestEngine_LoaderCanceled_FirstStep_Aborts(t *testing.T) {
-	// When the Loader on the first (and only editable) step returns
-	// context.Canceled, the wizard should return "wizard cancelled".
-	flow := &Flow{
-		Name: "test",
-		Steps: []Step{
-			{
-				Name:     "region",
-				Prompt:   SelectPrompt,
-				Required: true,
-				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
-					return nil, context.Canceled
-				},
-				Setter: func(v any) {},
-			},
-		},
-	}
-
-	engine := NewEngine(tuitesting.New(), nil, WithOutput(io.Discard))
-	err := engine.Run(context.Background(), flow)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "wizard cancelled") {
-		t.Errorf("expected 'wizard cancelled', got %q", err)
-	}
-}
-
-func TestEngine_LoaderCanceled_AllPriorFixed_Aborts(t *testing.T) {
-	// If all prior steps are fixed (set via IsSet), loader cancel on the
-	// last step should abort with "wizard cancelled".
-	flow := &Flow{
-		Name: "test",
-		Steps: []Step{
-			{
-				Name:     "region",
-				Prompt:   SelectPrompt,
-				Required: true,
-				Loader:   StaticChoices(Choice{Label: "A", Value: "a"}),
-				Setter:   func(v any) {},
-				IsSet:    func() bool { return true },
-				Value:    func() any { return "a" },
-			},
-			{
-				Name:     "gpu",
-				Prompt:   SelectPrompt,
-				Required: true,
-				Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
-					return nil, context.Canceled
-				},
-				Setter: func(v any) {},
-			},
-		},
-	}
-
-	engine := NewEngine(tuitesting.New(), nil, WithOutput(io.Discard))
-	err := engine.Run(context.Background(), flow)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "wizard cancelled") {
-		t.Errorf("expected 'wizard cancelled', got %q", err)
-	}
-}
-
-func TestEngine_IsEditable_FixedVsIsSet(t *testing.T) {
-	// Verify that stateFixed (from IsSet) makes a step non-editable,
-	// and back navigation skips over it correctly.
-	var region, env, gpu string
-
-	flow := &Flow{
-		Name: "test",
-		Steps: []Step{
-			{
-				Name:     "region",
-				Prompt:   SelectPrompt,
-				Required: true,
-				Loader: StaticChoices(
-					Choice{Label: "Finland", Value: "FIN-01"},
-					Choice{Label: "Sweden", Value: "SWE-01"},
-				),
-				Setter: func(v any) { region = v.(string) },
-			},
-			{
-				// This step is pre-set via flag — should be skipped and non-editable.
-				Name:     "env",
-				Prompt:   SelectPrompt,
-				Required: true,
-				Loader:   StaticChoices(Choice{Label: "Prod", Value: "prod"}),
-				Setter:   func(v any) { env = v.(string) },
-				IsSet:    func() bool { return true },
-				Value:    func() any { return "prod" },
-			},
-			{
-				Name:     "gpu",
-				Prompt:   SelectPrompt,
-				Required: true,
-				Loader: StaticChoices(
-					Choice{Label: "H100", Value: "h100"},
-					Choice{Label: "A100", Value: "a100"},
-				),
-				Setter: func(v any) { gpu = v.(string) },
-			},
-		},
-	}
-
-	// Step 1: select Finland
-	// Step 2: skipped (IsSet)
-	// Step 3: select "← Back" (idx 2, after h100/a100)
-	//   → should skip step 2 (fixed) and land on step 1
-	// Step 1 again: select Sweden
-	// Step 3 again: select A100 (idx 1)
-	p := tuitesting.New().
-		AddSelect(0). // region: Finland
-		AddSelect(2). // gpu: ← Back (skips fixed env, goes to region)
-		AddSelect(1). // region: Sweden
-		AddSelect(1)  // gpu: A100
-
-	engine := NewEngine(p, nil, WithOutput(io.Discard))
-	err := engine.Run(context.Background(), flow)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if region != "SWE-01" {
-		t.Errorf("expected region 'SWE-01', got %q", region)
-	}
-	if env != "prod" {
-		t.Errorf("expected env 'prod', got %q", env)
-	}
-	if gpu != "a100" {
-		t.Errorf("expected gpu 'a100', got %q", gpu)
-	}
-}
-
-func TestEngine_DefaultLayoutWhenNil(t *testing.T) {
-	flow := &Flow{
-		Name: "test",
-		Steps: []Step{
-			{
-				Name:   "a",
-				Prompt: TextInputPrompt,
-				Setter: func(v any) {},
-			},
-			{
-				Name:   "b",
-				Prompt: TextInputPrompt,
-				Setter: func(v any) {},
-			},
-		},
-	}
-
-	p := tuitesting.New().AddTextInput("1").AddTextInput("2")
-	var buf bytes.Buffer
-	engine := NewEngine(p, nil, WithOutput(&buf))
-
-	err := engine.Run(context.Background(), flow)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	output := buf.String()
-	if !strings.Contains(output, "Step 1 of 2") {
-		t.Errorf("default layout should include progress view, got:\n%s", output)
 	}
 }

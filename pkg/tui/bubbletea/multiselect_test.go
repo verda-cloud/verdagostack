@@ -448,13 +448,13 @@ func TestMultiSelectModel_EnterRejectsIfBelowMin(t *testing.T) {
 	}
 }
 
-func TestMultiSelectModel_CtrlCAborts(t *testing.T) {
+func TestMultiSelectModel_CtrlCInterrupts(t *testing.T) {
 	m := newMS([]string{"Apple", "Banana"})
 
 	m = msCtrl(m, 'c')
 
-	if !m.aborted {
-		t.Error("ctrl+c should abort")
+	if !m.interrupted {
+		t.Error("ctrl+c should set interrupted")
 	}
 }
 
@@ -547,18 +547,6 @@ func TestMultiSelectModel_ViewShowsCheckmarks(t *testing.T) {
 	}
 	if !strings.Contains(view, "[ ]") {
 		t.Error("view should show [ ] for unselected items")
-	}
-}
-
-func TestMultiSelectModel_ViewHintBar(t *testing.T) {
-	m := newMS([]string{"Apple", "Banana"})
-
-	view := m.View().Content
-	if !strings.Contains(view, "ctrl+a") {
-		t.Error("hint bar should mention ctrl+a")
-	}
-	if !strings.Contains(view, "filter") {
-		t.Error("hint bar should mention filter")
 	}
 }
 

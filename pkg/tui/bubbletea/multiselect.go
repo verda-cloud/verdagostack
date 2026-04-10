@@ -12,19 +12,20 @@ import (
 )
 
 type multiSelectModel struct {
-	prompt   string
-	choices  []string
-	filter   string
-	matched  []int // indices into choices that match filter
-	cursor   int   // position within matched (not choices)
-	selected map[int]bool
-	pageSize int
-	loop     bool
-	min      int
-	max      int
-	done     bool
-	aborted  bool
-	err      string
+	prompt      string
+	choices     []string
+	filter      string
+	matched     []int // indices into choices that match filter
+	cursor      int   // position within matched (not choices)
+	selected    map[int]bool
+	pageSize    int
+	loop        bool
+	min         int
+	max         int
+	done        bool
+	aborted     bool
+	interrupted bool // true for Ctrl+C (hard cancel), false for Esc (soft cancel)
+	err         string
 }
 
 func newMultiSelectModel(prompt string, choices []string, cfg tui.MultiSelectConfig) multiSelectModel {
@@ -157,7 +158,7 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refilter()
 			} else {
 				m.aborted = true
-				return m, tea.Quit
+				return m, func() tea.Msg { return GoBackMsg{} }
 			}
 		case tea.KeyBackspace:
 			if len(m.filter) > 0 {
@@ -172,7 +173,7 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.toggleAll()
 					return m, nil
 				case 'c':
-					m.aborted = true
+					m.interrupted = true
 					return m, tea.Quit
 				}
 			}
@@ -195,6 +196,30 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// Hints returns multiselect-specific key hints for the hint bar.
+func (m multiSelectModel) Hints() []string {
+	return []string{"↑/↓ navigate", "space toggle", "ctrl+a select all", "type to filter", "enter confirm", "esc back"}
+}
+
+// Result returns the selected indices after the user confirms.
+func (m multiSelectModel) Result() (any, bool) {
+	if !m.done {
+		return nil, false
+	}
+	var indices []int
+	for i := range m.choices {
+		if m.selected[i] {
+			indices = append(indices, i)
+		}
+	}
+	return indices, true
+}
+
+// NewMultiSelectPrompt creates a multiselect prompt model for use in the wizard composite.
+func NewMultiSelectPrompt(prompt string, choices []string, cfg tui.MultiSelectConfig) PromptModel {
+	return newMultiSelectModel(prompt, choices, cfg)
 }
 
 func (m multiSelectModel) View() tea.View {
@@ -241,7 +266,6 @@ func (m multiSelectModel) View() tea.View {
 	if m.err != "" {
 		fmt.Fprintf(&b, "  %s\n", errorStyle.Render("✗ "+m.err))
 	}
-	fmt.Fprintf(&b, "\n  %s\n", hintStyle.Render("↑/↓ navigate · space toggle · ctrl+a select all · type to filter · enter confirm · esc cancel"))
 	return tea.NewView(b.String())
 }
 
@@ -275,18 +299,15 @@ func (p *Prompter) MultiSelect(ctx context.Context, prompt string, choices []str
 	cfg := tui.ResolveMultiSelectConfig(opts)
 	model := newMultiSelectModel(prompt, choices, cfg)
 
-	program := tea.NewProgram(model,
-		tea.WithInput(p.in),
-		tea.WithOutput(p.out),
-		tea.WithContext(ctx),
-	)
-
-	result, err := program.Run()
-	if err != nil {
-		return nil, fmt.Errorf("multi-select prompt: %w", err)
+	r := p.runProgram(ctx, model)
+	if r.interrupted {
+		return nil, tui.ErrInterrupted
+	}
+	if r.err != nil {
+		return nil, fmt.Errorf("multi-select prompt: %w", r.err)
 	}
 
-	m := result.(multiSelectModel)
+	m := r.model.(multiSelectModel)
 	if m.aborted {
 		return nil, context.Canceled
 	}

@@ -12,15 +12,16 @@ import (
 )
 
 type selectModel struct {
-	prompt   string
-	choices  []string // original full list — never mutated
-	filter   string   // current filter text
-	matched  []int    // indices into choices that match filter
-	cursor   int      // position within matched (not choices)
-	pageSize int
-	loop     bool
-	chosen   bool
-	aborted  bool
+	prompt      string
+	choices     []string // original full list — never mutated
+	filter      string   // current filter text
+	matched     []int    // indices into choices that match filter
+	cursor      int      // position within matched (not choices)
+	pageSize    int
+	loop        bool
+	chosen      bool
+	aborted     bool
+	interrupted bool // true for Ctrl+C (hard cancel), false for Esc (soft cancel)
 }
 
 func newSelectModel(prompt string, choices []string, cfg tui.SelectConfig) selectModel {
@@ -109,7 +110,7 @@ func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refilter()
 			} else {
 				m.aborted = true
-				return m, tea.Quit
+				return m, func() tea.Msg { return GoBackMsg{} }
 			}
 		case tea.KeyBackspace:
 			if len(m.filter) > 0 {
@@ -119,7 +120,7 @@ func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		default:
 			if msg.Mod&tea.ModCtrl != 0 && msg.Code == 'c' {
-				m.aborted = true
+				m.interrupted = true
 				return m, tea.Quit
 			}
 			if msg.Text != "" {
@@ -169,7 +170,6 @@ func (m selectModel) View() tea.View {
 			fmt.Fprintf(&b, "    %s\n", dimStyle.Render(label))
 		}
 	}
-	fmt.Fprintf(&b, "\n  %s\n", hintStyle.Render("↑/↓ navigate · type to filter · enter select · esc cancel"))
 	return tea.NewView(b.String())
 }
 
@@ -194,6 +194,26 @@ func (m selectModel) visibleRange() (int, int) {
 	return start, end
 }
 
+// Hints returns select-specific key hints for the hint bar.
+func (m selectModel) Hints() []string {
+	return []string{"↑/↓ navigate", "type to filter", "enter select", "esc back"}
+}
+
+// Result returns the selected index after the user presses Enter.
+func (m selectModel) Result() (any, bool) {
+	if !m.chosen || len(m.matched) == 0 {
+		return nil, false
+	}
+	return m.matched[m.cursor], true
+}
+
+// NewSelectPrompt creates a select prompt model for use in the wizard composite.
+// The returned model handles domain keys only (arrows, Enter, type-to-filter, Esc).
+// Ctrl+C is NOT handled — the composite model intercepts it.
+func NewSelectPrompt(prompt string, choices []string, cfg tui.SelectConfig) PromptModel {
+	return newSelectModel(prompt, choices, cfg)
+}
+
 // Select implements tui.Prompter.
 func (p *Prompter) Select(ctx context.Context, prompt string, choices []string, opts ...tui.SelectOption) (int, error) {
 	if len(choices) == 0 {
@@ -203,18 +223,15 @@ func (p *Prompter) Select(ctx context.Context, prompt string, choices []string, 
 	cfg := tui.ResolveSelectConfig(opts)
 	model := newSelectModel(prompt, choices, cfg)
 
-	program := tea.NewProgram(model,
-		tea.WithInput(p.in),
-		tea.WithOutput(p.out),
-		tea.WithContext(ctx),
-	)
-
-	result, err := program.Run()
-	if err != nil {
-		return -1, fmt.Errorf("select prompt: %w", err)
+	r := p.runProgram(ctx, model)
+	if r.interrupted {
+		return -1, tui.ErrInterrupted
+	}
+	if r.err != nil {
+		return -1, fmt.Errorf("select prompt: %w", r.err)
 	}
 
-	m := result.(selectModel)
+	m := r.model.(selectModel)
 	if m.aborted {
 		return -1, context.Canceled
 	}

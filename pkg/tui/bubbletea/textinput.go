@@ -11,12 +11,13 @@ import (
 )
 
 type textInputModel struct {
-	prompt    string
-	textInput textinput.Model
-	submitted bool
-	aborted   bool
-	validate  func(string) error
-	err       error
+	prompt      string
+	textInput   textinput.Model
+	submitted   bool
+	aborted     bool
+	interrupted bool // true for Ctrl+C (hard cancel), false for Esc (soft cancel)
+	validate    func(string) error
+	err         error
 }
 
 func newTextInputModel(prompt string, cfg tui.TextInputConfig) textInputModel {
@@ -47,9 +48,12 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.submitted = true
 			return m, tea.Quit
-		case keyCtrlC, keyEsc:
-			m.aborted = true
+		case keyCtrlC:
+			m.interrupted = true
 			return m, tea.Quit
+		case keyEsc:
+			m.aborted = true
+			return m, func() tea.Msg { return GoBackMsg{} }
 		}
 	}
 
@@ -57,6 +61,21 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.textInput, cmd = m.textInput.Update(msg)
 	m.err = nil
 	return m, cmd
+}
+
+// Hints returns text input-specific key hints for the hint bar.
+func (m textInputModel) Hints() []string {
+	return []string{"enter submit", "esc back"}
+}
+
+// Result returns the text input value after the user submits.
+func (m textInputModel) Result() (any, bool) {
+	return m.textInput.Value(), m.submitted
+}
+
+// NewTextInputPrompt creates a text input prompt model for use in the wizard composite.
+func NewTextInputPrompt(prompt string, cfg tui.TextInputConfig) PromptModel {
+	return newTextInputModel(prompt, cfg)
 }
 
 func (m textInputModel) View() tea.View {
@@ -67,7 +86,6 @@ func (m textInputModel) View() tea.View {
 	if m.err != nil {
 		s += fmt.Sprintf("\n  %s", errorStyle.Render("✗ "+m.err.Error()))
 	}
-	s += fmt.Sprintf("\n\n  %s", hintStyle.Render("enter submit · esc cancel"))
 	return tea.NewView(s)
 }
 
@@ -76,18 +94,15 @@ func (p *Prompter) TextInput(ctx context.Context, prompt string, opts ...tui.Tex
 	cfg := tui.ResolveTextInputConfig(opts)
 	model := newTextInputModel(prompt, cfg)
 
-	program := tea.NewProgram(model,
-		tea.WithInput(p.in),
-		tea.WithOutput(p.out),
-		tea.WithContext(ctx),
-	)
-
-	result, err := program.Run()
-	if err != nil {
-		return "", fmt.Errorf("text input prompt: %w", err)
+	r := p.runProgram(ctx, model)
+	if r.interrupted {
+		return "", tui.ErrInterrupted
+	}
+	if r.err != nil {
+		return "", fmt.Errorf("text input prompt: %w", r.err)
 	}
 
-	m := result.(textInputModel)
+	m := r.model.(textInputModel)
 	if m.aborted {
 		return "", context.Canceled
 	}

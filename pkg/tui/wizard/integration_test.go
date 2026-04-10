@@ -1,0 +1,171 @@
+package wizard
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"strings"
+	"testing"
+	"time"
+
+	tuitesting "github.com/verda-cloud/verdagostack/pkg/tui/testing"
+)
+
+// keySequence builds a byte sequence from VT100 escape codes.
+func keySequence(keys ...string) io.Reader {
+	var buf bytes.Buffer
+	for _, k := range keys {
+		buf.WriteString(k)
+	}
+	return &buf
+}
+
+const (
+	keyEnter = "\r"
+	keyCtrlC = "\x03"
+	keyDown  = "\x1b[B"
+)
+
+func TestIntegration_SelectAndComplete(t *testing.T) {
+	var env string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "env",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "Dev", Value: "dev"}, Choice{Label: "Prod", Value: "prod"}),
+				Setter:   func(v any) { env = v.(string) },
+			},
+		},
+	}
+
+	// Enter selects first item
+	input := keySequence(keyEnter)
+	engine := NewEngine(tuitesting.New(), nil,
+		WithInput(input),
+		WithOutput(io.Discard),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := engine.Run(ctx, flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if env != "dev" {
+		t.Errorf("expected env 'dev', got %q", env)
+	}
+}
+
+func TestIntegration_TwoStepFlow(t *testing.T) {
+	var env, region string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "env",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "Dev", Value: "dev"}, Choice{Label: "Prod", Value: "prod"}),
+				Setter:   func(v any) { env = v.(string) },
+			},
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "US", Value: "us"}, Choice{Label: "EU", Value: "eu"}),
+				Setter:   func(v any) { region = v.(string) },
+			},
+		},
+	}
+
+	// Enter (select first), Enter (select first)
+	input := keySequence(keyEnter, keyEnter)
+	engine := NewEngine(tuitesting.New(), nil,
+		WithInput(input),
+		WithOutput(io.Discard),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := engine.Run(ctx, flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if env != "dev" {
+		t.Errorf("expected env 'dev', got %q", env)
+	}
+	if region != "us" {
+		t.Errorf("expected region 'us', got %q", region)
+	}
+}
+
+func TestIntegration_CtrlC_Exits(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "env",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "Dev", Value: "dev"}),
+				Setter:   func(v any) {},
+			},
+		},
+	}
+
+	input := keySequence(keyCtrlC)
+	engine := NewEngine(tuitesting.New(), nil,
+		WithInput(input),
+		WithOutput(io.Discard),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := engine.Run(ctx, flow)
+	if err == nil || !strings.Contains(err.Error(), "wizard cancelled") {
+		t.Fatalf("expected 'wizard cancelled', got %v", err)
+	}
+}
+
+func TestIntegration_ArrowDownAndSelect(t *testing.T) {
+	var env string
+
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "env",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "Dev", Value: "dev"}, Choice{Label: "Prod", Value: "prod"}),
+				Setter:   func(v any) { env = v.(string) },
+			},
+		},
+	}
+
+	// Down, Enter (select second item)
+	input := keySequence(keyDown, keyEnter)
+	engine := NewEngine(tuitesting.New(), nil,
+		WithInput(input),
+		WithOutput(io.Discard),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := engine.Run(ctx, flow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if env != "prod" {
+		t.Errorf("expected env 'prod', got %q", env)
+	}
+}

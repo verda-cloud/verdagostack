@@ -10,10 +10,11 @@ import (
 )
 
 type confirmModel struct {
-	prompt  string
-	value   bool
-	decided bool
-	aborted bool
+	prompt      string
+	value       bool
+	decided     bool
+	aborted     bool
+	interrupted bool // true for Ctrl+C (hard cancel), false for Esc (soft cancel)
 }
 
 func newConfirmModel(prompt string, cfg tui.ConfirmConfig) confirmModel {
@@ -40,12 +41,30 @@ func (m confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case keyEnter:
 			m.decided = true
 			return m, tea.Quit
-		case keyCtrlC, keyEsc:
-			m.aborted = true
+		case keyCtrlC:
+			m.interrupted = true
 			return m, tea.Quit
+		case keyEsc:
+			m.aborted = true
+			return m, func() tea.Msg { return GoBackMsg{} }
 		}
 	}
 	return m, nil
+}
+
+// Hints returns confirm-specific key hints for the hint bar.
+func (m confirmModel) Hints() []string {
+	return []string{"y/n", "enter confirm", "esc back"}
+}
+
+// Result returns the confirm value after the user decides.
+func (m confirmModel) Result() (any, bool) {
+	return m.value, m.decided
+}
+
+// NewConfirmPrompt creates a confirm prompt model for use in the wizard composite.
+func NewConfirmPrompt(prompt string, cfg tui.ConfirmConfig) PromptModel {
+	return newConfirmModel(prompt, cfg)
 }
 
 func (m confirmModel) View() tea.View {
@@ -68,18 +87,15 @@ func (p *Prompter) Confirm(ctx context.Context, prompt string, opts ...tui.Confi
 	cfg := tui.ResolveConfirmConfig(opts)
 	model := newConfirmModel(prompt, cfg)
 
-	program := tea.NewProgram(model,
-		tea.WithInput(p.in),
-		tea.WithOutput(p.out),
-		tea.WithContext(ctx),
-	)
-
-	result, err := program.Run()
-	if err != nil {
-		return false, fmt.Errorf("confirm prompt: %w", err)
+	r := p.runProgram(ctx, model)
+	if r.interrupted {
+		return false, tui.ErrInterrupted
+	}
+	if r.err != nil {
+		return false, fmt.Errorf("confirm prompt: %w", r.err)
 	}
 
-	m := result.(confirmModel)
+	m := r.model.(confirmModel)
 	if m.aborted {
 		return false, context.Canceled
 	}
