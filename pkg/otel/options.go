@@ -32,11 +32,10 @@ type OTelOptions struct {
 	Insecure bool `json:"insecure" mapstructure:"insecure"`
 }
 
-// NewOTelOptions returns OTelOptions with safe defaults (noop mode).
+// NewOTelOptions returns OTelOptions with safe defaults (noop mode, TLS enabled).
 func NewOTelOptions() *OTelOptions {
 	return &OTelOptions{
-		Mode:     OutputModeNoop,
-		Insecure: true,
+		Mode: OutputModeNoop,
 	}
 }
 

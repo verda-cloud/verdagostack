@@ -12,8 +12,8 @@ func TestNewOTelOptions_Defaults(t *testing.T) {
 	if opts.Mode != OutputModeNoop {
 		t.Errorf("expected default mode %q, got %q", OutputModeNoop, opts.Mode)
 	}
-	if !opts.Insecure {
-		t.Error("expected Insecure to default to true")
+	if opts.Insecure {
+		t.Error("expected Insecure to default to false (secure by default)")
 	}
 }
 
