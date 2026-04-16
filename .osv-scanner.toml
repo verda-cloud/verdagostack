@@ -7,11 +7,11 @@ id = "GO-2026-4771"
 # No fix available as of v5.9.1 — pgx is an indirect dep via gorm postgres driver
 # Remove this entry once pgx releases a patched version
 reason = "No fix available upstream (latest is v5.9.1)"
-ignoreUntil = "2026-07-16"
+ignoreUntil = 2026-07-16T00:00:00Z
 
 [[IgnoredVulns]]
 id = "GO-2026-4772"
 # pgx memory-safety vulnerability in pgproto3 (CVE-2026-33816)
 # Fixed in v5.9.0 but scanner still flags v5.9.1 — likely stale advisory data
 reason = "Fixed in v5.9.0, we are on v5.9.1"
-ignoreUntil = "2026-07-16"
+ignoreUntil = 2026-07-16T00:00:00Z
