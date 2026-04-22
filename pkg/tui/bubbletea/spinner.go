@@ -17,6 +17,7 @@ package bubbletea
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 
 	"charm.land/bubbles/v2/spinner"
@@ -72,6 +73,13 @@ func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == keyCtrlC {
 			m.done = true
 			m.finalMessage = m.message
+			// Re-raise SIGINT so whoever installed a signal handler
+			// (typically the wizard engine) can cancel the outer context
+			// and abort the underlying work — tea.Quit alone only tears
+			// down the spinner, leaving fn() running.
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				_ = p.Signal(os.Interrupt)
+			}
 			return m, tea.Quit
 		}
 	}
