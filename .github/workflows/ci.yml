@@ -30,6 +30,23 @@ jobs:
       - name: Run linters
         run: make lint
 
+  # License headers (Apache 2.0) on all Go files
+  license:
+    name: License Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.9"
+          cache: true
+
+      - name: Verify license headers
+        run: make license-check
+
   # Unit tests
   test:
     name: Test (Go ${{ matrix.go-version }})
@@ -167,12 +184,12 @@ jobs:
     name: All CI Checks Passed
     runs-on: ubuntu-latest
     if: always()
-    needs: [lint, test, build, format, mod-tidy, vuln-scan, changelog-guard]
+    needs: [lint, license, test, build, format, mod-tidy, vuln-scan, changelog-guard]
     steps:
       - name: Check results
         run: |
           # changelog-guard is skipped on push events, which is fine
-          for result in "${{ needs.lint.result }}" "${{ needs.test.result }}" "${{ needs.build.result }}" "${{ needs.format.result }}" "${{ needs.mod-tidy.result }}" "${{ needs.vuln-scan.result }}"; do
+          for result in "${{ needs.lint.result }}" "${{ needs.license.result }}" "${{ needs.test.result }}" "${{ needs.build.result }}" "${{ needs.format.result }}" "${{ needs.mod-tidy.result }}" "${{ needs.vuln-scan.result }}"; do
             if [ "$result" != "success" ]; then
               echo "One or more CI checks failed"
               exit 1

@@ -34,5 +34,6 @@ All logging goes through `pkg/log`. See [pkg/log/README.md](pkg/log/README.md) f
 ### Code style
 
 - Run `go vet ./...` before committing
+- New Go source files need the standard Apache 2.0 file header: run `make license` to add it; CI runs `make license-check`
 - Tests required for all new packages
 - Structured key-value logging preferred over printf-style in application code

@@ -1,7 +1,12 @@
 # Verdagostack Makefile
 # ──────────────────────────────────────────────────────────────────────
+#
+# License headers: Apache 2.0 (addlicense, Go sources only; ignores vendor)
+ADDLICENSE   := go run github.com/google/addlicense@v1.2.0
+LFLAGS       := -c "Verda Cloud Oy" -l apache -y 2026
+GOSRC_FIND   = find . -name '*.go' -not -path './vendor/*'
 
-.PHONY: build test lint fmt security setup pre-commit
+.PHONY: build test lint fmt license license-check security setup pre-commit
 .PHONY: tag tag-list tag-delete release changelog help
 
 # ─── Development Setup ──────────────────────────────────────────────
@@ -37,6 +42,16 @@ fmt: ## Format Go code
 		echo "  ℹ goimports not found, skipping import formatting"; \
 	fi
 	@echo "✓ Formatting complete!"
+
+license: ## Add Apache 2.0 license headers to all Go source files
+	@echo "→ Adding license headers to .go files..."
+	@$(GOSRC_FIND) -exec $(ADDLICENSE) $(LFLAGS) -v {} +
+	@echo "✓ License headers applied!"
+
+license-check: ## Verify all Go files have the Apache 2.0 license header
+	@echo "→ Checking license headers on .go files..."
+	@$(GOSRC_FIND) -exec $(ADDLICENSE) -check $(LFLAGS) {} +
+	@echo "✓ License headers OK!"
 
 security: ## Run security checks (gosec + govulncheck + gitleaks + trivy + osv-scanner)
 	@./scripts/security-scan.sh
