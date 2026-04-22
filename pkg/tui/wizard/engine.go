@@ -71,6 +71,10 @@ type Engine struct {
 	resultOverride chan promptResult // test-only: bypasses composite model
 	program        *tea.Program      // the running composite program (nil in test mode)
 	resultCh       chan promptResult // channel for receiving prompt results
+
+	// interruptCancel lets a second Ctrl+C on the "Exit wizard?" confirm
+	// abort any in-flight loader ctx, not just the wizard itself.
+	interruptCancel context.CancelFunc
 }
 
 // EngineOption configures the Engine.
@@ -195,18 +199,38 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	e.resultCh = e.resultOverride
 	e.program = nil
 
-	// Catch SIGINT to prevent process termination. Since we use
-	// tea.WithoutSignalHandler(), Ctrl+C in raw mode arrives as a key event.
-	// But during Loader execution (spinners), the terminal is temporarily
-	// in cooked mode where Ctrl+C generates SIGINT. Without this handler,
-	// Go's default SIGINT handler would kill the process and leave the
-	// terminal in raw mode.
+	// Turn SIGINT into a context cancellation so Ctrl+C works during
+	// Loader execution, when the terminal is in cooked mode and no
+	// bubbletea program is handling key events. Without this, Go's
+	// default handler kills the process and leaves the terminal in raw
+	// mode.
 	if e.resultOverride == nil {
+		sigCtx, sigCancel := context.WithCancel(ctx)
+		defer sigCancel()
+		ctx = sigCtx
+		e.interruptCancel = sigCancel
+
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt)
 		defer signal.Stop(sigCh)
+		done := make(chan struct{})
+		defer close(done)
 		go func() {
-			for range sigCh {
+			select {
+			case <-sigCh:
+				sigCancel()
+				// Drain further SIGINTs so repeated Ctrl+C does not
+				// fall through to Go's default and kill the process
+				// mid-cleanup, leaving the terminal in raw mode.
+				for {
+					select {
+					case <-sigCh:
+					case <-done:
+						return
+					}
+				}
+			case <-done:
+				return
 			}
 		}()
 	}
@@ -775,7 +799,11 @@ func (e *Engine) invalidateDownstream(changedIdx int) {
 // --- Exit confirmation ---
 
 // confirmExit swaps the active prompt with a "Exit wizard?" confirm prompt.
-// Returns true if the user chose to stay (declined or pressed Esc/Ctrl+C again).
+// Returns true if the user chose to stay (declined or pressed Esc).
+//
+// A second Ctrl+C on the confirm force-exits rather than bouncing back
+// into the flow — the user has already asked to leave once, and double
+// Ctrl+C is the universal escape hatch.
 func (e *Engine) confirmExit() (stayed bool) {
 	cfg := tui.ResolveConfirmConfig([]tui.ConfirmOption{tui.WithConfirmDefault(true)})
 	confirmModel := bubbletea.NewConfirmPrompt("Exit wizard?", cfg)
@@ -786,15 +814,21 @@ func (e *Engine) confirmExit() (stayed bool) {
 	})
 
 	result := <-e.resultCh
-	// If user confirmed exit, return false (don't stay).
-	// If user declined, pressed Esc (ActionBack), or Ctrl+C again (ActionExit on the confirm),
-	// return true (stay in wizard).
-	if result.action == ActionNone {
-		if confirmed, ok := result.value.(bool); ok && confirmed {
-			return false // exit
+	switch result.action {
+	case ActionExit:
+		// Second Ctrl+C — also cancel any in-flight loader ctx so no
+		// cleanup work sneaks past the exit.
+		if e.interruptCancel != nil {
+			e.interruptCancel()
 		}
+		return false
+	case ActionBack:
+		return true
 	}
-	return true // stay
+	if confirmed, ok := result.value.(bool); ok && confirmed {
+		return false
+	}
+	return true
 }
 
 // --- Utilities ---

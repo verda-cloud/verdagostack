@@ -183,3 +183,69 @@ func TestIntegration_ArrowDownAndSelect(t *testing.T) {
 		t.Errorf("expected env 'prod', got %q", env)
 	}
 }
+
+// TestIntegration_CtrlC_ConfirmExit_SingleY exercises the
+// WithExitConfirmation() happy path: Ctrl+C shows "Exit wizard?", user types
+// 'y', wizard exits cleanly.
+func TestIntegration_CtrlC_ConfirmExit_SingleY(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "env",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "Dev", Value: "dev"}),
+				Setter:   func(v any) {},
+			},
+		},
+	}
+
+	input := keySequence(keyCtrlC, "y", keyEnter)
+	engine := NewEngine(tuitesting.New(), nil,
+		WithInput(input),
+		WithOutput(io.Discard),
+		WithExitConfirmation(),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := engine.Run(ctx, flow)
+	if err == nil || !strings.Contains(err.Error(), "wizard cancelled") {
+		t.Fatalf("expected 'wizard cancelled', got %v", err)
+	}
+}
+
+// TestIntegration_CtrlC_ConfirmExit_DoubleCtrlC verifies the
+// "double-tap Ctrl+C force exits" behavior: hitting Ctrl+C twice must get
+// the user out of the wizard even with WithExitConfirmation() enabled.
+func TestIntegration_CtrlC_ConfirmExit_DoubleCtrlC(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "env",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "Dev", Value: "dev"}),
+				Setter:   func(v any) {},
+			},
+		},
+	}
+
+	input := keySequence(keyCtrlC, keyCtrlC)
+	engine := NewEngine(tuitesting.New(), nil,
+		WithInput(input),
+		WithOutput(io.Discard),
+		WithExitConfirmation(),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := engine.Run(ctx, flow)
+	if err == nil || !strings.Contains(err.Error(), "wizard cancelled") {
+		t.Fatalf("expected 'wizard cancelled' on double Ctrl+C, got %v", err)
+	}
+}
