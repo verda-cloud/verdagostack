@@ -35,6 +35,7 @@ install_go_tool() {
 echo "Go tools:"
 install_go_tool golangci-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 install_go_tool goimports     golang.org/x/tools/cmd/goimports@latest
+install_go_tool addlicense   github.com/google/addlicense@v1.2.0
 install_go_tool govulncheck   golang.org/x/vuln/cmd/govulncheck@latest
 echo ""
 
