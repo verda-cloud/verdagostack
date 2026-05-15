@@ -15,3 +15,12 @@ id = "GO-2026-4772"
 # Fixed in v5.9.0 but scanner still flags v5.9.1 — likely stale advisory data
 reason = "Fixed in v5.9.0, we are on v5.9.1"
 ignoreUntil = 2026-07-16T00:00:00Z
+
+[[IgnoredVulns]]
+id = "GHSA-jj45-xvq5-rhh9"
+# Confused Deputy in go-kratos/kratos HTTP server. No upstream fix
+# released as of v2.9.2 (the latest). Used only via
+# pkg/log/adapter/kratos. Re-evaluate when kratos publishes a release
+# containing the patch.
+reason = "No fix released upstream (v2.9.2 is latest)"
+ignoreUntil = 2026-08-15T00:00:00Z
