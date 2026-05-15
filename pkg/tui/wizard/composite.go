@@ -55,6 +55,9 @@ func newCompositeModel(bindings []KeyBinding, bus *MessageBus, resultCh chan pro
 	}
 	var wizardHints []string
 	for _, b := range bindings {
+		if b.Label == "" {
+			continue
+		}
 		wizardHints = append(wizardHints, b.Label)
 	}
 	return compositeModel{

@@ -30,6 +30,7 @@ type Prompter struct {
 	passwords    []string
 	selects      []int
 	multiSelects [][]int
+	liveLists    []int
 	editors      []string
 }
 
@@ -63,6 +64,12 @@ func (p *Prompter) AddSelect(v int) *Prompter {
 // AddMultiSelect queues a multi-select response (indices).
 func (p *Prompter) AddMultiSelect(v []int) *Prompter {
 	p.multiSelects = append(p.multiSelects, v)
+	return p
+}
+
+// AddLiveList queues a live-list response (index into rows).
+func (p *Prompter) AddLiveList(v int) *Prompter {
+	p.liveLists = append(p.liveLists, v)
 	return p
 }
 
@@ -114,6 +121,33 @@ func (p *Prompter) MultiSelect(_ context.Context, _ string, _ []string, _ ...tui
 	}
 	v := p.multiSelects[0]
 	p.multiSelects = p.multiSelects[1:]
+	return v, nil
+}
+
+// LiveList returns the next queued index. The updates channel (if
+// non-nil) is drained in the background so producers don't block;
+// drained values are discarded. Tests asserting on update behavior
+// should drive the model directly instead of going through this fake.
+func (p *Prompter) LiveList(ctx context.Context, _ string, _ []tui.LiveRow, updates <-chan tui.LiveListUpdate, _ ...tui.LiveListOption) (int, error) {
+	if updates != nil {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case _, ok := <-updates:
+					if !ok {
+						return
+					}
+				}
+			}
+		}()
+	}
+	if len(p.liveLists) == 0 {
+		return -1, fmt.Errorf("testing.Prompter: no live-list responses queued")
+	}
+	v := p.liveLists[0]
+	p.liveLists = p.liveLists[1:]
 	return v, nil
 }
 
@@ -186,3 +220,4 @@ func (p *Prompter) Pager(_ context.Context, _ string, _ ...tui.PagerOption) erro
 // Compile-time interface checks.
 var _ tui.Prompter = (*Prompter)(nil)
 var _ tui.Status = (*Prompter)(nil)
+var _ tui.LiveLister = (*Prompter)(nil)

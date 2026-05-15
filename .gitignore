@@ -351,6 +351,8 @@ dist
 # AI Assistants
 .cursor/
 .claude/
+.omx/
+.gitnexus/
 
 # VHS tape files
 *.tape

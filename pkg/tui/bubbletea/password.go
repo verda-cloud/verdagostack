@@ -30,6 +30,41 @@ type passwordModel struct {
 	submitted   bool
 	aborted     bool
 	interrupted bool // true for Ctrl+C (hard cancel), false for Esc (soft cancel)
+	bindings    []KeyBinding[passwordModel]
+}
+
+// DefaultPasswordBindings returns a fresh copy of the canonical
+// binding set. Stable IDs: submit, esc, exit.
+func DefaultPasswordBindings() []KeyBinding[passwordModel] {
+	return []KeyBinding[passwordModel]{
+		{
+			ID:    "submit",
+			Match: MatchKey(tea.KeyEnter),
+			Label: func(*passwordModel) string { return hintEnterEntry },
+			Handle: func(m *passwordModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				m.submitted = true
+				return tea.Quit, true
+			},
+		},
+		{
+			ID:    "esc",
+			Match: MatchKey(tea.KeyEscape),
+			Label: func(*passwordModel) string { return hintEscBack },
+			Handle: func(m *passwordModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				m.aborted = true
+				return func() tea.Msg { return GoBackMsg{} }, true
+			},
+		},
+		{
+			ID:    "exit",
+			Match: MatchRune('c', tea.ModCtrl),
+			Label: func(*passwordModel) string { return hintCtrlCExit },
+			Handle: func(m *passwordModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				m.interrupted = true
+				return tea.Quit, true
+			},
+		},
+	}
 }
 
 func newPasswordModel(prompt string) passwordModel {
@@ -41,24 +76,19 @@ func newPasswordModel(prompt string) passwordModel {
 	return passwordModel{
 		prompt:    prompt,
 		textInput: ti,
+		bindings:  DefaultPasswordBindings(),
 	}
 }
 
 func (m passwordModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m passwordModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case keyEnter:
-			m.submitted = true
-			return m, tea.Quit
-		case keyCtrlC:
-			m.interrupted = true
-			return m, tea.Quit
-		case keyEsc:
-			m.aborted = true
-			return m, func() tea.Msg { return GoBackMsg{} }
+	if _, ok := msg.(GoBackMsg); ok {
+		return m, tea.Quit // standalone mode quit; wizard composite intercepts before this
+	}
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		if cmd, stopped := Dispatch(&m, m.bindings, key); stopped {
+			return m, cmd
 		}
 	}
 
@@ -67,9 +97,9 @@ func (m passwordModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// Hints returns password-specific key hints for the hint bar.
+// Hints derives key hints from the resolved bindings.
 func (m passwordModel) Hints() []string {
-	return []string{"enter submit", "esc back"}
+	return HintsFor(&m, m.bindings)
 }
 
 // Result returns the password value after the user submits.

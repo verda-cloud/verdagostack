@@ -36,10 +36,166 @@ type multiSelectModel struct {
 	loop        bool
 	min         int
 	max         int
+	showHints   bool
+	customHints []string                       // nil = derive from bindings
+	bindings    []KeyBinding[multiSelectModel] // resolved (defaults + overrides + extras)
 	done        bool
 	aborted     bool
 	interrupted bool // true for Ctrl+C (hard cancel), false for Esc (soft cancel)
 	err         string
+}
+
+// DefaultMultiSelectBindings returns a fresh copy of the canonical
+// binding set. Stable IDs for WithMultiSelectRelabel / Hide: navigate,
+// vim-up, vim-down, toggle, select-all, filter-type, confirm, esc,
+// filter-backspace, exit.
+func DefaultMultiSelectBindings() []KeyBinding[multiSelectModel] {
+	return []KeyBinding[multiSelectModel]{
+		{
+			ID:    "navigate",
+			Match: MatchKey(tea.KeyUp, tea.KeyDown),
+			Label: func(*multiSelectModel) string { return "↑/↓ navigate" },
+			Handle: func(m *multiSelectModel, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+				if msg.Code == tea.KeyUp {
+					m.moveUp()
+				} else {
+					m.moveDown()
+				}
+				return nil, true
+			},
+		},
+		{
+			ID:    "vim-up",
+			Match: MatchRune('k'),
+			Label: func(*multiSelectModel) string { return "" },
+			// j/k navigate when filter is empty; otherwise pass through
+			// so filter-type appends the key to the filter.
+			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				if m.filter != "" {
+					return nil, false
+				}
+				m.moveUp()
+				return nil, true
+			},
+		},
+		{
+			ID:    "vim-down",
+			Match: MatchRune('j'),
+			Label: func(*multiSelectModel) string { return "" },
+			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				if m.filter != "" {
+					return nil, false
+				}
+				m.moveDown()
+				return nil, true
+			},
+		},
+		{
+			ID:    "toggle",
+			Match: MatchKey(tea.KeySpace),
+			Label: func(*multiSelectModel) string { return "space toggle" },
+			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				if len(m.matched) == 0 {
+					return nil, true
+				}
+				idx := m.matched[m.cursor]
+				if m.selected[idx] {
+					delete(m.selected, idx)
+					m.err = ""
+				} else {
+					if m.max > 0 && len(m.selected) >= m.max {
+						m.err = fmt.Sprintf("maximum %d selections allowed", m.max)
+					} else {
+						m.selected[idx] = true
+						m.err = ""
+					}
+				}
+				return nil, true
+			},
+		},
+		{
+			ID:    "select-all",
+			Match: MatchRune('a', tea.ModCtrl),
+			Label: func(*multiSelectModel) string { return "ctrl+a select all" },
+			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				m.toggleAll()
+				return nil, true
+			},
+		},
+		{
+			ID:    "filter-type",
+			Match: MatchText(),
+			Label: func(*multiSelectModel) string { return "type to filter" },
+			Handle: func(m *multiSelectModel, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+				m.filter += msg.Text
+				m.refilter()
+				return nil, true
+			},
+		},
+		{
+			ID:    "confirm",
+			Match: MatchKey(tea.KeyEnter),
+			Label: func(*multiSelectModel) string { return "enter confirm" },
+			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				if m.min > 0 && len(m.selected) < m.min {
+					m.err = fmt.Sprintf("at least %d selections required", m.min)
+					return nil, true
+				}
+				m.done = true
+				return tea.Quit, true
+			},
+		},
+		{
+			ID:    "esc",
+			Match: MatchKey(tea.KeyEscape),
+			Label: func(m *multiSelectModel) string {
+				if m.filter != "" {
+					return "esc clear filter"
+				}
+				return hintEscBack
+			},
+			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				if m.filter != "" {
+					m.filter = ""
+					m.refilter()
+					return nil, true
+				}
+				m.aborted = true
+				return func() tea.Msg { return GoBackMsg{} }, true
+			},
+		},
+		{
+			ID:    "filter-backspace",
+			Match: MatchKey(tea.KeyBackspace),
+			Label: func(*multiSelectModel) string { return "" },
+			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				if len(m.filter) > 0 {
+					_, size := utf8.DecodeLastRuneInString(m.filter)
+					m.filter = m.filter[:len(m.filter)-size]
+					m.refilter()
+				}
+				return nil, true
+			},
+		},
+		{
+			ID:    "exit",
+			Match: MatchRune('c', tea.ModCtrl),
+			Label: func(*multiSelectModel) string { return hintCtrlCExit },
+			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				m.interrupted = true
+				return tea.Quit, true
+			},
+		},
+	}
+}
+
+// WithMultiSelectAddBindings prepends extras so they outrank the default
+// catch-all matchers. See WithSelectAddBindings for full semantics.
+func WithMultiSelectAddBindings(extras ...KeyBinding[multiSelectModel]) tui.MultiSelectOption {
+	return func(c *tui.MultiSelectConfig) {
+		existing, _ := c.ExtraBindings.([]KeyBinding[multiSelectModel])
+		c.ExtraBindings = append(existing, extras...)
+	}
 }
 
 func newMultiSelectModel(prompt string, choices []string, cfg tui.MultiSelectConfig) multiSelectModel {
@@ -57,33 +213,32 @@ func newMultiSelectModel(prompt string, choices []string, cfg tui.MultiSelectCon
 	for i := range choices {
 		matched[i] = i
 	}
+	defaults := ApplyBindingOverrides(DefaultMultiSelectBindings(), cfg.RelabelByID, cfg.HiddenByID)
+	var bindings []KeyBinding[multiSelectModel]
+	if extras, ok := cfg.ExtraBindings.([]KeyBinding[multiSelectModel]); ok && len(extras) > 0 {
+		bindings = make([]KeyBinding[multiSelectModel], 0, len(extras)+len(defaults))
+		bindings = append(bindings, extras...)
+		bindings = append(bindings, defaults...)
+	} else {
+		bindings = defaults
+	}
 	return multiSelectModel{
-		prompt:   prompt,
-		choices:  choices,
-		matched:  matched,
-		selected: selected,
-		pageSize: ps,
-		loop:     cfg.Loop,
-		min:      cfg.Min,
-		max:      cfg.Max,
+		prompt:      prompt,
+		choices:     choices,
+		matched:     matched,
+		selected:    selected,
+		pageSize:    ps,
+		loop:        cfg.Loop,
+		min:         cfg.Min,
+		max:         cfg.Max,
+		showHints:   cfg.ShowHints,
+		customHints: cfg.Hints,
+		bindings:    bindings,
 	}
 }
 
 func (m *multiSelectModel) refilter() {
-	if m.filter == "" {
-		m.matched = make([]int, len(m.choices))
-		for i := range m.choices {
-			m.matched[i] = i
-		}
-	} else {
-		lower := strings.ToLower(m.filter)
-		m.matched = m.matched[:0]
-		for i, c := range m.choices {
-			if strings.Contains(strings.ToLower(c), lower) {
-				m.matched = append(m.matched, i)
-			}
-		}
-	}
+	m.matched = refilter(m.filter, m.choices, m.matched)
 	m.cursor = 0
 }
 
@@ -137,84 +292,24 @@ func (m *multiSelectModel) toggleAll() {
 func (m multiSelectModel) Init() tea.Cmd { return nil }
 
 func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch msg.Code {
-		case tea.KeyUp:
-			m.moveUp()
-		case tea.KeyDown:
-			m.moveDown()
-		case tea.KeySpace:
-			if len(m.matched) == 0 {
-				return m, nil
-			}
-			idx := m.matched[m.cursor]
-			if m.selected[idx] {
-				delete(m.selected, idx)
-			} else {
-				if m.max > 0 && len(m.selected) >= m.max {
-					m.err = fmt.Sprintf("maximum %d selections allowed", m.max)
-				} else {
-					m.selected[idx] = true
-					m.err = ""
-				}
-			}
-		case tea.KeyEnter:
-			if m.min > 0 && len(m.selected) < m.min {
-				m.err = fmt.Sprintf("at least %d selections required", m.min)
-				return m, nil
-			}
-			m.done = true
-			return m, tea.Quit
-		case tea.KeyEscape:
-			if m.filter != "" {
-				m.filter = ""
-				m.refilter()
-			} else {
-				m.aborted = true
-				return m, func() tea.Msg { return GoBackMsg{} }
-			}
-		case tea.KeyBackspace:
-			if len(m.filter) > 0 {
-				_, size := utf8.DecodeLastRuneInString(m.filter)
-				m.filter = m.filter[:len(m.filter)-size]
-				m.refilter()
-			}
-		default:
-			if msg.Mod&tea.ModCtrl != 0 {
-				switch msg.Code {
-				case 'a':
-					m.toggleAll()
-					return m, nil
-				case 'c':
-					m.interrupted = true
-					return m, tea.Quit
-				}
-			}
-			if msg.Text != "" {
-				s := msg.Text
-				// j/k navigation only when not filtering.
-				if m.filter == "" {
-					switch s {
-					case "k":
-						m.moveUp()
-						return m, nil
-					case "j":
-						m.moveDown()
-						return m, nil
-					}
-				}
-				m.filter += s
-				m.refilter()
-			}
-		}
+	if _, ok := msg.(GoBackMsg); ok {
+		return m, tea.Quit // standalone mode quit; wizard composite intercepts before this
 	}
-	return m, nil
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return m, nil
+	}
+	cmd, _ := Dispatch(&m, m.bindings, key)
+	return m, cmd
 }
 
-// Hints returns multiselect-specific key hints for the hint bar.
+// Hints returns the hint bar entries. customHints (from WithMultiSelectHints)
+// wins; otherwise hints derive from the binding set via HintsFor.
 func (m multiSelectModel) Hints() []string {
-	return []string{"↑/↓ navigate", "space toggle", "ctrl+a select all", "type to filter", "enter confirm", "esc back"}
+	if m.customHints != nil {
+		return m.customHints
+	}
+	return HintsFor(&m, m.bindings)
 }
 
 // Result returns the selected indices after the user confirms.
@@ -280,28 +375,14 @@ func (m multiSelectModel) View() tea.View {
 	if m.err != "" {
 		fmt.Fprintf(&b, "  %s\n", errorStyle.Render("✗ "+m.err))
 	}
+	if m.showHints {
+		fmt.Fprintf(&b, "\n%s\n", dimStyle.Render(strings.Join(m.Hints(), " · ")))
+	}
 	return tea.NewView(b.String())
 }
 
 func (m multiSelectModel) visibleRange() (int, int) {
-	total := len(m.matched)
-	if total == 0 {
-		return 0, 0
-	}
-	if m.pageSize >= total {
-		return 0, total
-	}
-	half := m.pageSize / 2
-	start := m.cursor - half
-	if start < 0 {
-		start = 0
-	}
-	end := start + m.pageSize
-	if end > total {
-		end = total
-		start = end - m.pageSize
-	}
-	return start, end
+	return visibleWindow(len(m.matched), m.cursor, m.pageSize)
 }
 
 // MultiSelect implements tui.Prompter.

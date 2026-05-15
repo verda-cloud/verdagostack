@@ -41,6 +41,27 @@ type Prompter interface {
 	Editor(ctx context.Context, prompt string, opts ...EditorOption) (string, error)
 }
 
+// LiveLister is the optional capability for prompters that support a
+// live-updating picker. Kept out of Prompter to avoid breaking fakes
+// and alternate engines. Callers type-assert:
+//
+//	if ll, ok := prompter.(tui.LiveLister); ok {
+//	    idx, err := ll.LiveList(ctx, prompt, rows, updates, opts...)
+//	}
+//
+// Contract:
+//   - Updates with unknown Key are dropped.
+//   - Multiple updates for the same Key: last-write-wins.
+//   - Cursor identity is preserved across updates (by Key, not index).
+//   - Type-to-filter matches the current Label, so rows may drop in
+//     or out of the filtered view as labels change.
+//   - Caller owns concurrency, retry, and error handling; renderer
+//     styles rows with Err != nil distinctly.
+//   - Closing the channel is optional; ctx is the cancellation primitive.
+type LiveLister interface {
+	LiveList(ctx context.Context, prompt string, rows []LiveRow, updates <-chan LiveListUpdate, opts ...LiveListOption) (int, error)
+}
+
 // IO holds the input/output streams for the prompter.
 // This mirrors the pattern used in pkg/app for testability.
 type IO struct {
@@ -65,12 +86,33 @@ type ConfirmOption func(*ConfirmConfig)
 
 // ConfirmConfig holds resolved Confirm settings.
 type ConfirmConfig struct {
-	Default bool // default answer when user presses Enter
+	Default       bool              // default answer when user presses Enter
+	RelabelByID   map[string]string // override individual binding labels by ID
+	HiddenByID    []string          // suppress these binding labels from the hint bar
+	ExtraBindings any               // engine-specific extra/replacement bindings
 }
 
 // WithConfirmDefault sets the default value for a confirm prompt.
 func WithConfirmDefault(v bool) ConfirmOption {
 	return func(c *ConfirmConfig) { c.Default = v }
+}
+
+// WithConfirmRelabel renames a binding's hint by its ID (yes-no,
+// confirm, esc, exit). Unknown IDs are silently ignored.
+func WithConfirmRelabel(id, label string) ConfirmOption {
+	return func(c *ConfirmConfig) {
+		if c.RelabelByID == nil {
+			c.RelabelByID = make(map[string]string)
+		}
+		c.RelabelByID[id] = label
+	}
+}
+
+// WithConfirmHide suppresses one or more bindings from the hint bar by ID.
+func WithConfirmHide(ids ...string) ConfirmOption {
+	return func(c *ConfirmConfig) {
+		c.HiddenByID = append(c.HiddenByID, ids...)
+	}
 }
 
 // --- TextInput Options ---
@@ -80,9 +122,12 @@ type TextInputOption func(*TextInputConfig)
 
 // TextInputConfig holds resolved TextInput settings.
 type TextInputConfig struct {
-	Default     string
-	Placeholder string
-	Validate    func(string) error
+	Default       string
+	Placeholder   string
+	Validate      func(string) error
+	RelabelByID   map[string]string // override individual binding labels by ID
+	HiddenByID    []string          // suppress these binding labels from the hint bar
+	ExtraBindings any               // engine-specific extra/replacement bindings
 }
 
 // WithDefault sets the default value for a text input.
@@ -100,6 +145,24 @@ func WithValidation(fn func(string) error) TextInputOption {
 	return func(c *TextInputConfig) { c.Validate = fn }
 }
 
+// WithTextInputRelabel renames a binding's hint by its ID (submit,
+// esc, exit). Unknown IDs are silently ignored.
+func WithTextInputRelabel(id, label string) TextInputOption {
+	return func(c *TextInputConfig) {
+		if c.RelabelByID == nil {
+			c.RelabelByID = make(map[string]string)
+		}
+		c.RelabelByID[id] = label
+	}
+}
+
+// WithTextInputHide suppresses one or more bindings from the hint bar by ID.
+func WithTextInputHide(ids ...string) TextInputOption {
+	return func(c *TextInputConfig) {
+		c.HiddenByID = append(c.HiddenByID, ids...)
+	}
+}
+
 // --- Select Options ---
 
 // SelectOption configures a Select prompt.
@@ -107,9 +170,14 @@ type SelectOption func(*SelectConfig)
 
 // SelectConfig holds resolved Select settings.
 type SelectConfig struct {
-	Default  int  // index of the default selection
-	PageSize int  // number of visible items (0 = show all)
-	Loop     bool // wrap around at ends
+	Default       int               // index of the default selection
+	PageSize      int               // number of visible items (0 = show all)
+	Loop          bool              // wrap around at ends
+	ShowHints     bool              // render the prompt's Hints() bar below the choices
+	Hints         []string          // override hint strings entirely; nil = use prompt defaults
+	RelabelByID   map[string]string // override individual binding labels by ID
+	HiddenByID    []string          // suppress these binding labels from the hint bar
+	ExtraBindings any               // engine-specific extra/replacement bindings (set via bubbletea options)
 }
 
 // WithSelectDefault sets the default selected index.
@@ -127,6 +195,120 @@ func WithLoop(v bool) SelectOption {
 	return func(c *SelectConfig) { c.Loop = v }
 }
 
+// WithShowHints renders the prompt's Hints() bar below the choices.
+// Off by default — wizard flows render hints externally, so callers
+// inside a wizard step must NOT set this.
+func WithShowHints(v bool) SelectOption {
+	return func(c *SelectConfig) { c.ShowHints = v }
+}
+
+// WithHints replaces all hint strings (for localization or shorter
+// labels). For per-binding rename use WithSelectRelabel; for
+// suppression use WithSelectHide.
+func WithHints(hints ...string) SelectOption {
+	return func(c *SelectConfig) { c.Hints = hints }
+}
+
+// WithSelectRelabel renames a binding's hint by its ID (navigate,
+// select, esc, exit, …). Unknown IDs are silently ignored.
+func WithSelectRelabel(id, label string) SelectOption {
+	return func(c *SelectConfig) {
+		if c.RelabelByID == nil {
+			c.RelabelByID = make(map[string]string)
+		}
+		c.RelabelByID[id] = label
+	}
+}
+
+// WithSelectHide suppresses the listed binding labels from the hint
+// bar. The keys still trigger their handlers.
+func WithSelectHide(ids ...string) SelectOption {
+	return func(c *SelectConfig) {
+		c.HiddenByID = append(c.HiddenByID, ids...)
+	}
+}
+
+// --- LiveList Options ---
+
+// LiveRow is one row of a LiveList. Key is the stable identity used
+// across updates; Label is the initial display text and what
+// type-to-filter matches until replaced.
+type LiveRow struct {
+	Key   string
+	Label string
+}
+
+// LiveListUpdate replaces the Label of the row identified by Key.
+// Err is a signal flag — even when set, supply a meaningful Label
+// ("error: rate limited") since the renderer still shows it.
+type LiveListUpdate struct {
+	Key   string
+	Label string
+	Err   error
+}
+
+// LiveListOption configures a LiveList prompt.
+type LiveListOption func(*LiveListConfig)
+
+// LiveListConfig mirrors SelectConfig. Separate type so live-only
+// fields (debounce, etc.) won't widen SelectConfig later.
+type LiveListConfig struct {
+	Default       int
+	PageSize      int
+	Loop          bool
+	ShowHints     bool
+	Hints         []string
+	RelabelByID   map[string]string
+	HiddenByID    []string
+	ExtraBindings any // engine-specific extras (set via bubbletea options)
+}
+
+// WithLiveListDefault sets the initial cursor position.
+func WithLiveListDefault(index int) LiveListOption {
+	return func(c *LiveListConfig) { c.Default = index }
+}
+
+// WithLiveListPageSize sets the number of visible rows.
+func WithLiveListPageSize(n int) LiveListOption {
+	return func(c *LiveListConfig) { c.PageSize = n }
+}
+
+// WithLiveListLoop enables cursor wrap.
+func WithLiveListLoop(v bool) LiveListOption {
+	return func(c *LiveListConfig) { c.Loop = v }
+}
+
+// WithLiveListShowHints renders the prompt's Hints() bar below the
+// rows. Off by default — must not be set inside a wizard step.
+func WithLiveListShowHints(v bool) LiveListOption {
+	return func(c *LiveListConfig) { c.ShowHints = v }
+}
+
+// WithLiveListHints replaces all hint strings. For per-binding rename
+// use WithLiveListRelabel.
+func WithLiveListHints(hints ...string) LiveListOption {
+	return func(c *LiveListConfig) { c.Hints = hints }
+}
+
+// WithLiveListRelabel renames a binding's hint by its ID; same ID
+// space as Select (navigate, select, esc, exit, …).
+func WithLiveListRelabel(id, label string) LiveListOption {
+	return func(c *LiveListConfig) {
+		if c.RelabelByID == nil {
+			c.RelabelByID = make(map[string]string)
+		}
+		c.RelabelByID[id] = label
+	}
+}
+
+// WithLiveListHide suppresses the listed binding labels from the hint
+// bar; keys still trigger their handlers.
+func WithLiveListHide(ids ...string) LiveListOption {
+	return func(c *LiveListConfig) {
+		c.HiddenByID = append(c.HiddenByID, ids...)
+	}
+}
+
 // --- MultiSelect Options ---
 
 // MultiSelectOption configures a MultiSelect prompt.
@@ -134,11 +316,16 @@ type MultiSelectOption func(*MultiSelectConfig)
 
 // MultiSelectConfig holds resolved MultiSelect settings.
 type MultiSelectConfig struct {
-	Defaults []int // indices selected by default
-	PageSize int
-	Loop     bool
-	Min      int // minimum required selections (0 = no minimum)
-	Max      int // maximum allowed selections (0 = no maximum)
+	Defaults      []int // indices selected by default
+	PageSize      int
+	Loop          bool
+	Min           int               // minimum required selections (0 = no minimum)
+	Max           int               // maximum allowed selections (0 = no maximum)
+	ShowHints     bool              // render the prompt's Hints() bar below the choices
+	Hints         []string          // override hint strings entirely; nil = use prompt defaults
+	RelabelByID   map[string]string // override individual binding labels by ID
+	HiddenByID    []string          // suppress these binding labels from the hint bar
+	ExtraBindings any               // engine-specific extra/replacement bindings (set via bubbletea options)
 }
 
 // WithMultiSelectDefaults sets the default selected indices.
@@ -159,6 +346,37 @@ func WithMinSelections(n int) MultiSelectOption {
 // WithMaxSelections sets the maximum allowed selections.
 func WithMaxSelections(n int) MultiSelectOption {
 	return func(c *MultiSelectConfig) { c.Max = n }
+}
+
+// WithMultiSelectShowHints renders the prompt's Hints() bar below the
+// choices. Off by default — must not be set inside a wizard step.
+func WithMultiSelectShowHints(v bool) MultiSelectOption {
+	return func(c *MultiSelectConfig) { c.ShowHints = v }
+}
+
+// WithMultiSelectHints replaces all hint strings. For per-binding
+// rename use WithMultiSelectRelabel.
+func WithMultiSelectHints(hints ...string) MultiSelectOption {
+	return func(c *MultiSelectConfig) { c.Hints = hints }
+}
+
+// WithMultiSelectRelabel renames a binding's hint by its ID (navigate,
+// toggle, select-all, confirm, esc, exit). Unknown IDs are ignored.
+func WithMultiSelectRelabel(id, label string) MultiSelectOption {
+	return func(c *MultiSelectConfig) {
+		if c.RelabelByID == nil {
+			c.RelabelByID = make(map[string]string)
+		}
+		c.RelabelByID[id] = label
+	}
+}
+
+// WithMultiSelectHide suppresses the listed binding labels from the
+// hint bar; keys still trigger their handlers.
+func WithMultiSelectHide(ids ...string) MultiSelectOption {
+	return func(c *MultiSelectConfig) {
+		c.HiddenByID = append(c.HiddenByID, ids...)
+	}
 }
 
 // --- Editor Options ---

@@ -38,9 +38,12 @@ type KeyBinding struct {
 }
 
 // DefaultKeyBindings returns the default wizard key bindings.
+// The Ctrl+C binding's Label is empty so the prompt's Hints() owns
+// the "ctrl+c exit" display — the composite concatenates without
+// dedup, and a label here would duplicate it.
 func DefaultKeyBindings() []KeyBinding {
 	return []KeyBinding{
-		{Key: KeyPattern{Code: 'c', Mod: tea.ModCtrl}, Action: ActionExit, Label: "ctrl+c exit"},
+		{Key: KeyPattern{Code: 'c', Mod: tea.ModCtrl}, Action: ActionExit, Label: ""},
 	}
 }
 

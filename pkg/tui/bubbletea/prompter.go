@@ -114,6 +114,7 @@ func WithIO(io tui.IO) func(*Prompter) {
 // Compile-time interface checks.
 var _ tui.Prompter = (*Prompter)(nil)
 var _ tui.Status = (*Prompter)(nil)
+var _ tui.LiveLister = (*Prompter)(nil)
 
 func init() {
 	tui.RegisterBuilder(func(_ ...func(*tui.IO)) tui.Prompter {

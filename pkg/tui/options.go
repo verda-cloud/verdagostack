@@ -41,6 +41,15 @@ func ResolveSelectConfig(opts []SelectOption) SelectConfig {
 	return cfg
 }
 
+// ResolveLiveListConfig applies options to a default LiveListConfig.
+func ResolveLiveListConfig(opts []LiveListOption) LiveListConfig {
+	cfg := LiveListConfig{PageSize: 10, Loop: true}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg
+}
+
 // ResolveMultiSelectConfig applies options to a default MultiSelectConfig.
 func ResolveMultiSelectConfig(opts []MultiSelectOption) MultiSelectConfig {
 	cfg := MultiSelectConfig{PageSize: 10, Loop: true}
