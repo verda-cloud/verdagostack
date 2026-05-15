@@ -271,7 +271,7 @@ func TestLiveList_AddBindings(t *testing.T) {
 	if !strings.Contains(view, "ctrl+r refresh") {
 		t.Errorf("custom binding label missing, got:\n%s", view)
 	}
-	m = llKey(m, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	_ = llKey(m, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	if !fired {
 		t.Error("custom binding did not fire")
 	}

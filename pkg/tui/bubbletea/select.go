@@ -200,20 +200,7 @@ func newSelectModel(prompt string, choices []string, cfg tui.SelectConfig) selec
 }
 
 func (m *selectModel) refilter() {
-	if m.filter == "" {
-		m.matched = make([]int, len(m.choices))
-		for i := range m.choices {
-			m.matched[i] = i
-		}
-	} else {
-		lower := strings.ToLower(m.filter)
-		m.matched = m.matched[:0]
-		for i, c := range m.choices {
-			if strings.Contains(strings.ToLower(c), lower) {
-				m.matched = append(m.matched, i)
-			}
-		}
-	}
+	m.matched = refilter(m.filter, m.choices, m.matched)
 	m.cursor = 0
 }
 
@@ -295,24 +282,7 @@ func (m selectModel) renderHintBar(b *strings.Builder) {
 }
 
 func (m selectModel) visibleRange() (int, int) {
-	total := len(m.matched)
-	if total == 0 {
-		return 0, 0
-	}
-	if m.pageSize >= total {
-		return 0, total
-	}
-	half := m.pageSize / 2
-	start := m.cursor - half
-	if start < 0 {
-		start = 0
-	}
-	end := start + m.pageSize
-	if end > total {
-		end = total
-		start = end - m.pageSize
-	}
-	return start, end
+	return visibleWindow(len(m.matched), m.cursor, m.pageSize)
 }
 
 // Hints returns the hint bar entries. customHints (from WithHints)
