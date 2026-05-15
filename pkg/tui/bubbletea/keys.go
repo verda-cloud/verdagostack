@@ -14,9 +14,17 @@
 
 package bubbletea
 
-// Common key names used in bubbletea Update handlers.
+// Common key names used in bubbletea Update handlers (still used by
+// editor/pager/progress/spinner; prompt models now use KeyBinding).
 const (
-	keyEnter = "enter"
 	keyCtrlC = "ctrl+c"
 	keyEsc   = "esc"
+)
+
+// Common hint-label strings shared across prompt models. Centralizing
+// them keeps the goconst linter quiet and ensures consistent wording.
+const (
+	hintEscBack    = "esc back"
+	hintCtrlCExit  = "ctrl+c exit"
+	hintEnterEntry = "enter submit"
 )

@@ -29,46 +29,103 @@ type confirmModel struct {
 	decided     bool
 	aborted     bool
 	interrupted bool // true for Ctrl+C (hard cancel), false for Esc (soft cancel)
+	bindings    []KeyBinding[confirmModel]
+}
+
+// DefaultConfirmBindings returns the canonical binding set for the
+// confirm prompt. Stable IDs: "yes-no", "confirm", "esc", "exit".
+func DefaultConfirmBindings() []KeyBinding[confirmModel] {
+	return []KeyBinding[confirmModel]{
+		{
+			ID:    "yes-no",
+			Match: MatchText(),
+			Label: func(*confirmModel) string { return "y/n" },
+			Handle: func(m *confirmModel, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+				switch msg.Text {
+				case "y", "Y":
+					m.value = true
+					m.decided = true
+					return tea.Quit, true
+				case "n", "N":
+					m.value = false
+					m.decided = true
+					return tea.Quit, true
+				}
+				return nil, false // unrecognized printable — let later bindings see it (none claim)
+			},
+		},
+		{
+			ID:    "confirm",
+			Match: MatchKey(tea.KeyEnter),
+			Label: func(*confirmModel) string { return "enter confirm" },
+			Handle: func(m *confirmModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				m.decided = true
+				return tea.Quit, true
+			},
+		},
+		{
+			ID:    "esc",
+			Match: MatchKey(tea.KeyEscape),
+			Label: func(*confirmModel) string { return hintEscBack },
+			Handle: func(m *confirmModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				m.aborted = true
+				return func() tea.Msg { return GoBackMsg{} }, true
+			},
+		},
+		{
+			ID:    "exit",
+			Match: MatchRune('c', tea.ModCtrl),
+			Label: func(*confirmModel) string { return hintCtrlCExit },
+			Handle: func(m *confirmModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				m.interrupted = true
+				return tea.Quit, true
+			},
+		},
+	}
 }
 
 func newConfirmModel(prompt string, cfg tui.ConfirmConfig) confirmModel {
+	defaults := ApplyBindingOverrides(DefaultConfirmBindings(), cfg.RelabelByID, cfg.HiddenByID)
+	var bindings []KeyBinding[confirmModel]
+	if extras, ok := cfg.ExtraBindings.([]KeyBinding[confirmModel]); ok && len(extras) > 0 {
+		bindings = make([]KeyBinding[confirmModel], 0, len(extras)+len(defaults))
+		bindings = append(bindings, extras...)
+		bindings = append(bindings, defaults...)
+	} else {
+		bindings = defaults
+	}
 	return confirmModel{
-		prompt: prompt,
-		value:  cfg.Default,
+		prompt:   prompt,
+		value:    cfg.Default,
+		bindings: bindings,
+	}
+}
+
+// WithConfirmAddBindings prepends extra bindings to the default set.
+func WithConfirmAddBindings(extras ...KeyBinding[confirmModel]) tui.ConfirmOption {
+	return func(c *tui.ConfirmConfig) {
+		existing, _ := c.ExtraBindings.([]KeyBinding[confirmModel])
+		c.ExtraBindings = append(existing, extras...)
 	}
 }
 
 func (m confirmModel) Init() tea.Cmd { return nil }
 
 func (m confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "y", "Y":
-			m.value = true
-			m.decided = true
-			return m, tea.Quit
-		case "n", "N":
-			m.value = false
-			m.decided = true
-			return m, tea.Quit
-		case keyEnter:
-			m.decided = true
-			return m, tea.Quit
-		case keyCtrlC:
-			m.interrupted = true
-			return m, tea.Quit
-		case keyEsc:
-			m.aborted = true
-			return m, func() tea.Msg { return GoBackMsg{} }
-		}
+	if _, ok := msg.(GoBackMsg); ok {
+		return m, tea.Quit // standalone mode quit; wizard composite intercepts before this
 	}
-	return m, nil
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return m, nil
+	}
+	cmd, _ := Dispatch(&m, m.bindings, key)
+	return m, cmd
 }
 
-// Hints returns confirm-specific key hints for the hint bar.
+// Hints derives confirm-specific key hints from the resolved bindings.
 func (m confirmModel) Hints() []string {
-	return []string{"y/n", "enter confirm", "esc back"}
+	return HintsFor(&m, m.bindings)
 }
 
 // Result returns the confirm value after the user decides.

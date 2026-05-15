@@ -15,6 +15,7 @@
 package wizard
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -107,6 +108,59 @@ func TestComposite_View_ContainsPrompt(t *testing.T) {
 	view := m.View()
 	if view.Content == "" {
 		t.Fatal("expected non-empty view")
+	}
+}
+
+// TestComposite_HintBar_UsesPromptHints verifies the wizard's composite
+// hint bar reads from prompt.Hints() and renders default hints (without
+// duplicate ctrl+c — DefaultKeyBindings now suppresses its label).
+func TestComposite_HintBar_UsesPromptHints(t *testing.T) {
+	resultCh := make(chan promptResult, 1)
+	cfg := tui.ResolveSelectConfig(nil) // ShowHints = false (wizard default)
+	prompt := bubbletea.NewSelectPrompt("Pick", []string{"a", "b"}, cfg)
+
+	m := newCompositeModel(DefaultKeyBindings(), nil, resultCh)
+	m.setPrompt(prompt)
+
+	view := m.View().Content
+	if !strings.Contains(view, "↑/↓ navigate") {
+		t.Errorf("wizard hint bar missing default hints, got:\n%s", view)
+	}
+	if !strings.Contains(view, "ctrl+c exit") {
+		t.Errorf("wizard hint bar should show ctrl+c exit (via prompt.Hints), got:\n%s", view)
+	}
+	// Must not appear twice (prompt owns it, wizard label is empty).
+	if strings.Count(view, "ctrl+c exit") != 1 {
+		t.Errorf("ctrl+c exit should appear exactly once, got %d:\n%s",
+			strings.Count(view, "ctrl+c exit"), view)
+	}
+	// In the wizard path, ShowHints stays false → prompt does not render
+	// its own internal hint bar inside View.Content. So default hints
+	// appear once total (from the composite).
+	if strings.Count(view, "↑/↓ navigate") != 1 {
+		t.Errorf("default hints should appear exactly once in wizard view, got %d:\n%s",
+			strings.Count(view, "↑/↓ navigate"), view)
+	}
+}
+
+// TestComposite_HintBar_HonorsPromptOverride verifies callers can swap the
+// hint text in a wizard step by passing WithHints when constructing the
+// prompt — composite reads from prompt.Hints() so the override propagates.
+func TestComposite_HintBar_HonorsPromptOverride(t *testing.T) {
+	resultCh := make(chan promptResult, 1)
+	custom := []string{"↑/↓ pick", "↵ go"}
+	cfg := tui.ResolveSelectConfig([]tui.SelectOption{tui.WithHints(custom...)})
+	prompt := bubbletea.NewSelectPrompt("Pick", []string{"a"}, cfg)
+
+	m := newCompositeModel(DefaultKeyBindings(), nil, resultCh)
+	m.setPrompt(prompt)
+
+	view := m.View().Content
+	if !strings.Contains(view, "↑/↓ pick · ↵ go") {
+		t.Errorf("prompt override did not propagate to wizard hint bar, got:\n%s", view)
+	}
+	if strings.Contains(view, "↑/↓ navigate") {
+		t.Errorf("default hints should be replaced, got:\n%s", view)
 	}
 }
 

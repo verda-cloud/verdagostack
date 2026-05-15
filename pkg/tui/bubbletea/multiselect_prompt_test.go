@@ -15,6 +15,7 @@
 package bubbletea
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -82,5 +83,62 @@ func TestMultiSelectPrompt_Result_NotDoneInitially(t *testing.T) {
 	_, done := m.Result()
 	if done {
 		t.Fatal("should not be done initially")
+	}
+}
+
+func TestMultiSelectPrompt_WithShowHints_PlumbingE2E(t *testing.T) {
+	opts := []tui.MultiSelectOption{tui.WithMultiSelectShowHints(true)}
+	cfg := tui.ResolveMultiSelectConfig(opts)
+	if !cfg.ShowHints {
+		t.Fatal("WithMultiSelectShowHints did not flow into config")
+	}
+
+	m := NewMultiSelectPrompt("Pick", []string{"a", "b"}, cfg)
+	view := m.View().Content
+	if !strings.Contains(view, "↑/↓ navigate") {
+		t.Errorf("hint bar missing, got:\n%s", view)
+	}
+	if !strings.Contains(view, "ctrl+c exit") {
+		t.Errorf("default Hints() should include ctrl+c exit, got:\n%s", view)
+	}
+}
+
+func TestMultiSelectPrompt_WithMultiSelectHints_OverridePlumbingE2E(t *testing.T) {
+	custom := []string{"↑/↓ move", "␣ check", "↵ done"}
+	opts := []tui.MultiSelectOption{
+		tui.WithMultiSelectShowHints(true),
+		tui.WithMultiSelectHints(custom...),
+	}
+	cfg := tui.ResolveMultiSelectConfig(opts)
+
+	m := NewMultiSelectPrompt("Pick", []string{"a", "b"}, cfg)
+	hints := m.Hints()
+	if len(hints) != len(custom) {
+		t.Fatalf("Hints() length = %d, want %d", len(hints), len(custom))
+	}
+	for i := range custom {
+		if hints[i] != custom[i] {
+			t.Errorf("Hints()[%d] = %q, want %q", i, hints[i], custom[i])
+		}
+	}
+	view := m.View().Content
+	if !strings.Contains(view, "↑/↓ move · ␣ check · ↵ done") {
+		t.Errorf("override not rendered, got:\n%s", view)
+	}
+	if strings.Contains(view, "ctrl+a select all") {
+		t.Errorf("default hint text should be replaced by override, got:\n%s", view)
+	}
+}
+
+func TestMultiSelectPrompt_WithMultiSelectHints_ZeroArgsFallsBackToDefaults(t *testing.T) {
+	opts := []tui.MultiSelectOption{
+		tui.WithMultiSelectShowHints(true),
+		tui.WithMultiSelectHints(),
+	}
+	cfg := tui.ResolveMultiSelectConfig(opts)
+	m := NewMultiSelectPrompt("Pick", []string{"a"}, cfg)
+	hints := m.Hints()
+	if len(hints) == 0 || hints[0] != "↑/↓ navigate" {
+		t.Errorf("expected defaults, got %v", hints)
 	}
 }

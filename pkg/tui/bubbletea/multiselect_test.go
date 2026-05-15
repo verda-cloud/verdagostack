@@ -584,6 +584,85 @@ func TestMultiSelectModel_ViewDoneShowsSelected(t *testing.T) {
 	}
 }
 
+func TestMultiSelectModel_View_HintBar(t *testing.T) {
+	const defaultBar = "↑/↓ navigate · space toggle · ctrl+a select all · type to filter · enter confirm · esc back · ctrl+c exit"
+	tests := []struct {
+		name        string
+		mutate      func(*tui.MultiSelectConfig)
+		wantContain []string
+		wantAbsent  []string
+	}{
+		{
+			name:       "hints off by default",
+			mutate:     func(c *tui.MultiSelectConfig) {},
+			wantAbsent: []string{"navigate", "ctrl+c exit"},
+		},
+		{
+			name:        "ShowHints renders default bar",
+			mutate:      func(c *tui.MultiSelectConfig) { c.ShowHints = true },
+			wantContain: []string{defaultBar},
+		},
+		{
+			name: "WithMultiSelectHints overrides defaults",
+			mutate: func(c *tui.MultiSelectConfig) {
+				c.ShowHints = true
+				c.Hints = []string{"↑/↓ move", "␣ check", "↵ done"}
+			},
+			wantContain: []string{"↑/↓ move · ␣ check · ↵ done"},
+			wantAbsent:  []string{"navigate", "ctrl+a", "ctrl+c exit"},
+		},
+		{
+			name: "override ignored when ShowHints off",
+			mutate: func(c *tui.MultiSelectConfig) {
+				c.Hints = []string{"x"}
+			},
+			wantAbsent: []string{"navigate", "x"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newMS([]string{"a", "b"}, tt.mutate)
+			view := m.View().Content
+			for _, s := range tt.wantContain {
+				if !strings.Contains(view, s) {
+					t.Errorf("expected view to contain %q, got:\n%s", s, view)
+				}
+			}
+			for _, s := range tt.wantAbsent {
+				if strings.Contains(view, s) {
+					t.Errorf("expected view to NOT contain %q, got:\n%s", s, view)
+				}
+			}
+		})
+	}
+}
+
+func TestMultiSelectModel_HintBar_AbsentInDoneView(t *testing.T) {
+	m := newMS([]string{"alpha", "beta"}, func(c *tui.MultiSelectConfig) { c.ShowHints = true })
+	m = msKey(m, tea.KeyPressMsg{Code: tea.KeySpace})
+	m = msKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.done {
+		t.Fatal("expected done=true")
+	}
+	view := m.View().Content
+	if strings.Contains(view, "navigate") {
+		t.Errorf("done view must not render hint bar, got:\n%s", view)
+	}
+}
+
+func TestMultiSelectModel_HintBar_AtBottomBelowChoices(t *testing.T) {
+	m := newMS([]string{"alpha", "beta"}, func(c *tui.MultiSelectConfig) { c.ShowHints = true })
+	view := m.View().Content
+	choicesAt := strings.Index(view, "alpha")
+	hintsAt := strings.Index(view, "↑/↓ navigate")
+	if choicesAt < 0 || hintsAt < 0 {
+		t.Fatalf("expected both choices and hint bar in view, got:\n%s", view)
+	}
+	if hintsAt <= choicesAt {
+		t.Errorf("hint bar should be after choices: choices@%d hints@%d", choicesAt, hintsAt)
+	}
+}
+
 func TestMultiSelectModel_ViewShowsError(t *testing.T) {
 	m := newMS([]string{"Apple", "Banana"}, func(c *tui.MultiSelectConfig) { c.Min = 2 })
 

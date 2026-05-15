@@ -33,6 +33,74 @@ type textInputModel struct {
 	pristine    bool // true until user types first character; typing clears the pre-filled default
 	validate    func(string) error
 	err         error
+	bindings    []KeyBinding[textInputModel]
+}
+
+// DefaultTextInputBindings returns the canonical binding set.
+// Stable IDs: "submit", "esc", "exit". A hidden "pristine-clear"
+// binding runs on the first printable keystroke and is not part of
+// the public surface.
+func DefaultTextInputBindings() []KeyBinding[textInputModel] {
+	return []KeyBinding[textInputModel]{
+		{
+			ID:    "submit",
+			Match: MatchKey(tea.KeyEnter),
+			Label: func(*textInputModel) string { return hintEnterEntry },
+			Handle: func(m *textInputModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				if m.validate != nil {
+					if err := m.validate(m.textInput.Value()); err != nil {
+						m.err = err
+						return nil, true
+					}
+				}
+				m.submitted = true
+				return tea.Quit, true
+			},
+		},
+		{
+			ID:    "esc",
+			Match: MatchKey(tea.KeyEscape),
+			Label: func(*textInputModel) string { return hintEscBack },
+			Handle: func(m *textInputModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				m.aborted = true
+				return func() tea.Msg { return GoBackMsg{} }, true
+			},
+		},
+		{
+			ID:    "exit",
+			Match: MatchRune('c', tea.ModCtrl),
+			Label: func(*textInputModel) string { return hintCtrlCExit },
+			Handle: func(m *textInputModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				m.interrupted = true
+				return tea.Quit, true
+			},
+		},
+		{
+			// Hidden pass-through that clears the pre-filled default on
+			// the first printable keystroke, before the textinput bubble
+			// receives the event. Always passes the event through.
+			ID:    "pristine-clear",
+			Match: func(_ tea.KeyPressMsg) bool { return true },
+			Label: func(*textInputModel) string { return "" },
+			Handle: func(m *textInputModel, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+				if m.pristine {
+					m.pristine = false
+					if msg.Text != "" && msg.Mod == 0 {
+						m.textInput.SetValue("")
+					}
+				}
+				return nil, false // never claims — falls through to textInput.Update
+			},
+		},
+	}
+}
+
+// WithTextInputAddBindings prepends extra bindings to the default set.
+func WithTextInputAddBindings(extras ...KeyBinding[textInputModel]) tui.TextInputOption {
+	return func(c *tui.TextInputConfig) {
+		existing, _ := c.ExtraBindings.([]KeyBinding[textInputModel])
+		c.ExtraBindings = append(existing, extras...)
+	}
 }
 
 func newTextInputModel(prompt string, cfg tui.TextInputConfig) textInputModel {
@@ -41,45 +109,34 @@ func newTextInputModel(prompt string, cfg tui.TextInputConfig) textInputModel {
 	ti.SetValue(cfg.Default)
 	ti.Focus()
 
+	defaults := ApplyBindingOverrides(DefaultTextInputBindings(), cfg.RelabelByID, cfg.HiddenByID)
+	var bindings []KeyBinding[textInputModel]
+	if extras, ok := cfg.ExtraBindings.([]KeyBinding[textInputModel]); ok && len(extras) > 0 {
+		bindings = make([]KeyBinding[textInputModel], 0, len(extras)+len(defaults))
+		bindings = append(bindings, extras...)
+		bindings = append(bindings, defaults...)
+	} else {
+		bindings = defaults
+	}
+
 	return textInputModel{
 		prompt:    prompt,
 		textInput: ti,
 		pristine:  cfg.Default != "",
 		validate:  cfg.Validate,
+		bindings:  bindings,
 	}
 }
 
 func (m textInputModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case keyEnter:
-			if m.validate != nil {
-				if err := m.validate(m.textInput.Value()); err != nil {
-					m.err = err
-					return m, nil
-				}
-			}
-			m.submitted = true
-			return m, tea.Quit
-		case keyCtrlC:
-			m.interrupted = true
-			return m, tea.Quit
-		case keyEsc:
-			m.aborted = true
-			return m, func() tea.Msg { return GoBackMsg{} }
-		default:
-			// Clear pre-filled default on first keystroke so the user's
-			// input replaces it rather than appending. This mimics the
-			// native "select-all on focus" behavior.
-			if m.pristine {
-				m.pristine = false
-				if msg.Text != "" && msg.Mod == 0 {
-					m.textInput.SetValue("")
-				}
-			}
+	if _, ok := msg.(GoBackMsg); ok {
+		return m, tea.Quit // standalone mode quit; wizard composite intercepts before this
+	}
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		if cmd, stopped := Dispatch(&m, m.bindings, key); stopped {
+			return m, cmd
 		}
 	}
 
@@ -89,9 +146,9 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// Hints returns text input-specific key hints for the hint bar.
+// Hints derives text-input-specific key hints from the resolved bindings.
 func (m textInputModel) Hints() []string {
-	return []string{"enter submit", "esc back"}
+	return HintsFor(&m, m.bindings)
 }
 
 // Result returns the text input value after the user submits.

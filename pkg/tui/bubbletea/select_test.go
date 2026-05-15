@@ -372,6 +372,97 @@ func TestSelectModel_ArrowKeysOnEmptyMatches(t *testing.T) {
 	}
 }
 
+func TestSelectModel_View_HintBar(t *testing.T) {
+	const defaultBar = "↑/↓ navigate · type to filter · enter select · esc back · ctrl+c exit"
+	tests := []struct {
+		name        string
+		cfg         tui.SelectConfig
+		wantContain []string // substrings that must appear in view
+		wantAbsent  []string // substrings that must NOT appear
+	}{
+		{
+			name:       "hints off by default",
+			cfg:        tui.SelectConfig{},
+			wantAbsent: []string{"navigate", "ctrl+c exit"},
+		},
+		{
+			name:        "ShowHints renders default bar",
+			cfg:         tui.SelectConfig{ShowHints: true},
+			wantContain: []string{defaultBar},
+		},
+		{
+			name:        "WithHints overrides defaults",
+			cfg:         tui.SelectConfig{ShowHints: true, Hints: []string{"↑/↓ move", "↵ pick", "esc cancel"}},
+			wantContain: []string{"↑/↓ move · ↵ pick · esc cancel"},
+			wantAbsent:  []string{"navigate", "type to filter", "ctrl+c exit"},
+		},
+		{
+			name:        "single-element override",
+			cfg:         tui.SelectConfig{ShowHints: true, Hints: []string{"q quit"}},
+			wantContain: []string{"q quit"},
+			wantAbsent:  []string{" · "},
+		},
+		{
+			name:       "override ignored when ShowHints off",
+			cfg:        tui.SelectConfig{Hints: []string{"q quit"}},
+			wantAbsent: []string{"q quit", "navigate"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newSelectModel("Pick one", []string{"a", "b"}, tt.cfg)
+			view := m.View().Content
+			for _, s := range tt.wantContain {
+				if !strings.Contains(view, s) {
+					t.Errorf("expected view to contain %q, got:\n%s", s, view)
+				}
+			}
+			for _, s := range tt.wantAbsent {
+				if strings.Contains(view, s) {
+					t.Errorf("expected view to NOT contain %q, got:\n%s", s, view)
+				}
+			}
+		})
+	}
+}
+
+func TestSelectModel_HintBar_NoMatchesPathStillRenders(t *testing.T) {
+	m := newSelectModel("Pick", []string{"alpha", "beta"}, tui.SelectConfig{ShowHints: true})
+	m = sendRune(m, 'z')
+	view := m.View().Content
+	if !strings.Contains(view, "no matches") {
+		t.Fatal("expected no-matches placeholder")
+	}
+	if !strings.Contains(view, "↑/↓ navigate") {
+		t.Errorf("hint bar must still render under no-matches state, got:\n%s", view)
+	}
+}
+
+func TestSelectModel_HintBar_AbsentInChosenView(t *testing.T) {
+	m := newSelectModel("Pick", []string{"alpha", "beta"}, tui.SelectConfig{ShowHints: true})
+	m = sendKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	view := m.View().Content
+	if !m.chosen {
+		t.Fatal("expected chosen=true")
+	}
+	if strings.Contains(view, "navigate") {
+		t.Errorf("chosen view must not render hint bar, got:\n%s", view)
+	}
+}
+
+func TestSelectModel_HintBar_AtBottomBelowChoices(t *testing.T) {
+	m := newSelectModel("Pick", []string{"alpha", "beta"}, tui.SelectConfig{ShowHints: true})
+	view := m.View().Content
+	choicesAt := strings.Index(view, "alpha")
+	hintsAt := strings.Index(view, "↑/↓ navigate")
+	if choicesAt < 0 || hintsAt < 0 {
+		t.Fatalf("expected both choices and hint bar in view, got:\n%s", view)
+	}
+	if hintsAt <= choicesAt {
+		t.Errorf("hint bar should be after choices: choices@%d hints@%d", choicesAt, hintsAt)
+	}
+}
+
 func TestSelectModel_ViewChosenWithFilter(t *testing.T) {
 	choices := []string{"Apple", "Apricot", "Banana", "Blueberry"}
 	m := newSelectModel("Pick", choices, tui.SelectConfig{PageSize: 10, Loop: true})

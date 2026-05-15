@@ -15,6 +15,7 @@
 package bubbletea
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -112,4 +113,79 @@ func TestSelectPrompt_Result_NotDoneInitially(t *testing.T) {
 	if done {
 		t.Fatal("should not be done initially")
 	}
+}
+
+// TestSelectPrompt_WithShowHints_PlumbingE2E exercises the full option
+// resolution path that callers use: SelectOption → ResolveSelectConfig →
+// NewSelectPrompt → View. Catches breakage between the public API and the
+// model internals.
+func TestSelectPrompt_WithShowHints_PlumbingE2E(t *testing.T) {
+	opts := []tui.SelectOption{tui.WithShowHints(true)}
+	cfg := tui.ResolveSelectConfig(opts)
+
+	if !cfg.ShowHints {
+		t.Fatal("WithShowHints did not flow into config")
+	}
+
+	m := NewSelectPrompt("Pick", []string{"a", "b"}, cfg)
+	view := m.View().Content
+	if !strings.Contains(view, "↑/↓ navigate") {
+		t.Errorf("hint bar missing from rendered view, got:\n%s", view)
+	}
+	if !strings.Contains(view, "ctrl+c exit") {
+		t.Errorf("default Hints() should include ctrl+c exit, got:\n%s", view)
+	}
+}
+
+func TestSelectPrompt_WithHints_OverridePlumbingE2E(t *testing.T) {
+	custom := []string{"↑/↓ move", "↵ open", "q quit"}
+	opts := []tui.SelectOption{
+		tui.WithShowHints(true),
+		tui.WithHints(custom...),
+	}
+	cfg := tui.ResolveSelectConfig(opts)
+
+	m := NewSelectPrompt("Pick", []string{"a", "b"}, cfg)
+
+	if got := m.Hints(); !equalStrings(got, custom) {
+		t.Errorf("Hints() = %v, want %v", got, custom)
+	}
+	view := m.View().Content
+	if !strings.Contains(view, "↑/↓ move · ↵ open · q quit") {
+		t.Errorf("override not rendered, got:\n%s", view)
+	}
+	if strings.Contains(view, "type to filter") {
+		t.Errorf("default hint text should be replaced by override, got:\n%s", view)
+	}
+}
+
+func TestSelectPrompt_WithHints_ZeroArgsFallsBackToDefaults(t *testing.T) {
+	// WithHints() with no args produces a nil variadic slice — the model
+	// should treat that as "use defaults," not "render an empty bar."
+	opts := []tui.SelectOption{
+		tui.WithShowHints(true),
+		tui.WithHints(),
+	}
+	cfg := tui.ResolveSelectConfig(opts)
+	m := NewSelectPrompt("Pick", []string{"a"}, cfg)
+
+	hints := m.Hints()
+	if len(hints) == 0 {
+		t.Fatal("expected defaults, got empty")
+	}
+	if hints[0] != "↑/↓ navigate" {
+		t.Errorf("expected default hints, got %v", hints)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
