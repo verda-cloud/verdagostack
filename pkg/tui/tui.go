@@ -41,30 +41,23 @@ type Prompter interface {
 	Editor(ctx context.Context, prompt string, opts ...EditorOption) (string, error)
 }
 
-// LiveLister is an optional capability interface for prompters that
-// support a live-updating picker. Kept separate from Prompter to avoid
-// breaking implementations (test fakes, alternate engines) that don't
-// support live updates. Callers should type-assert:
+// LiveLister is the optional capability for prompters that support a
+// live-updating picker. Kept out of Prompter to avoid breaking fakes
+// and alternate engines. Callers type-assert:
 //
 //	if ll, ok := prompter.(tui.LiveLister); ok {
 //	    idx, err := ll.LiveList(ctx, prompt, rows, updates, opts...)
-//	} else {
-//	    // fall back to Prompter.Select with pre-fetched labels
 //	}
 //
-// Semantics:
-//   - Updates with an unknown Key are silently dropped.
-//   - Multiple updates for the same Key apply in arrival order
-//     (last-write-wins).
-//   - Cursor identity is preserved across updates: hovering Key
-//     "foo" stays on "foo" even if its filtered index shifts.
-//   - Type-to-filter matches against the current (possibly updated)
-//     Label, so rows can drop in/out of the filtered view.
-//   - The caller owns concurrency, retry, and error handling. The
-//     renderer styles rows where Err != nil distinctly but still
-//     shows the supplied Label.
-//   - Closing the channel is a courtesy — the prompter never depends
-//     on close to function correctly.
+// Contract:
+//   - Updates with unknown Key are dropped.
+//   - Multiple updates for the same Key: last-write-wins.
+//   - Cursor identity is preserved across updates (by Key, not index).
+//   - Type-to-filter matches the current Label, so rows may drop in
+//     or out of the filtered view as labels change.
+//   - Caller owns concurrency, retry, and error handling; renderer
+//     styles rows with Err != nil distinctly.
+//   - Closing the channel is optional; ctx is the cancellation primitive.
 type LiveLister interface {
 	LiveList(ctx context.Context, prompt string, rows []LiveRow, updates <-chan LiveListUpdate, opts ...LiveListOption) (int, error)
 }
@@ -104,8 +97,8 @@ func WithConfirmDefault(v bool) ConfirmOption {
 	return func(c *ConfirmConfig) { c.Default = v }
 }
 
-// WithConfirmRelabel renames a single binding's hint by its stable ID
-// (e.g. "yes-no", "confirm", "esc", "exit").
+// WithConfirmRelabel renames a binding's hint by its ID (yes-no,
+// confirm, esc, exit). Unknown IDs are silently ignored.
 func WithConfirmRelabel(id, label string) ConfirmOption {
 	return func(c *ConfirmConfig) {
 		if c.RelabelByID == nil {
@@ -152,8 +145,8 @@ func WithValidation(fn func(string) error) TextInputOption {
 	return func(c *TextInputConfig) { c.Validate = fn }
 }
 
-// WithTextInputRelabel renames a single binding's hint by its stable ID
-// (e.g. "submit", "esc", "exit").
+// WithTextInputRelabel renames a binding's hint by its ID (submit,
+// esc, exit). Unknown IDs are silently ignored.
 func WithTextInputRelabel(id, label string) TextInputOption {
 	return func(c *TextInputConfig) {
 		if c.RelabelByID == nil {
@@ -202,27 +195,22 @@ func WithLoop(v bool) SelectOption {
 	return func(c *SelectConfig) { c.Loop = v }
 }
 
-// WithShowHints toggles rendering the prompt's built-in key hints below the
-// choices. Off by default — wizard flows render hints externally and must
-// not set this. Use for non-wizard interactive prompts (list browsers,
-// pickers) where the wizard composite isn't in play.
+// WithShowHints renders the prompt's Hints() bar below the choices.
+// Off by default — wizard flows render hints externally, so callers
+// inside a wizard step must NOT set this.
 func WithShowHints(v bool) SelectOption {
 	return func(c *SelectConfig) { c.ShowHints = v }
 }
 
-// WithHints overrides the hint strings rendered by the hint bar (when
-// ShowHints is on). Useful for localization or shorter labels. Key handling
-// is unaffected — this only changes what's displayed.
-//
-// WithHints replaces ALL hints. For per-binding rename, use WithSelectRelabel.
-// For suppression only, use WithSelectHide.
+// WithHints replaces all hint strings (for localization or shorter
+// labels). For per-binding rename use WithSelectRelabel; for
+// suppression use WithSelectHide.
 func WithHints(hints ...string) SelectOption {
 	return func(c *SelectConfig) { c.Hints = hints }
 }
 
-// WithSelectRelabel renames a single binding's hint by its stable ID
-// (e.g. "navigate", "select", "esc", "exit"). Use this for localization
-// without rewriting the entire hint set. Unknown IDs are ignored.
+// WithSelectRelabel renames a binding's hint by its ID (navigate,
+// select, esc, exit, …). Unknown IDs are silently ignored.
 func WithSelectRelabel(id, label string) SelectOption {
 	return func(c *SelectConfig) {
 		if c.RelabelByID == nil {
@@ -232,8 +220,8 @@ func WithSelectRelabel(id, label string) SelectOption {
 	}
 }
 
-// WithSelectHide suppresses one or more bindings from the hint bar by ID.
-// The key still works — only its label is hidden.
+// WithSelectHide suppresses the listed binding labels from the hint
+// bar. The keys still trigger their handlers.
 func WithSelectHide(ids ...string) SelectOption {
 	return func(c *SelectConfig) {
 		c.HiddenByID = append(c.HiddenByID, ids...)
@@ -242,18 +230,17 @@ func WithSelectHide(ids ...string) SelectOption {
 
 // --- LiveList Options ---
 
-// LiveRow is a row in a LiveList. Key identifies the row stably across
-// label updates. Label is the initial rendered string and what
-// type-to-filter matches against until an update replaces it.
+// LiveRow is one row of a LiveList. Key is the stable identity used
+// across updates; Label is the initial display text and what
+// type-to-filter matches until replaced.
 type LiveRow struct {
 	Key   string
 	Label string
 }
 
-// LiveListUpdate replaces the Label for the row identified by Key.
-// When Err is non-nil the renderer styles the row body distinctly;
-// callers should still provide a meaningful Label in the error case
-// (e.g. "error: rate limited") since Err is signal, not text.
+// LiveListUpdate replaces the Label of the row identified by Key.
+// Err is a signal flag — even when set, supply a meaningful Label
+// ("error: rate limited") since the renderer still shows it.
 type LiveListUpdate struct {
 	Key   string
 	Label string
@@ -263,18 +250,17 @@ type LiveListUpdate struct {
 // LiveListOption configures a LiveList prompt.
 type LiveListOption func(*LiveListConfig)
 
-// LiveListConfig mirrors SelectConfig for keyboard/hint behavior.
-// Kept as a separate type so adding LiveList-only fields (debounce
-// interval, etc.) doesn't widen SelectConfig.
+// LiveListConfig mirrors SelectConfig. Separate type so live-only
+// fields (debounce, etc.) won't widen SelectConfig later.
 type LiveListConfig struct {
-	Default       int               // initial cursor index (post-filter)
-	PageSize      int               // visible rows (0 = show all)
-	Loop          bool              // wrap cursor at ends
-	ShowHints     bool              // render Hints() bar below choices
-	Hints         []string          // override hints entirely; nil = defaults from prompt
-	RelabelByID   map[string]string // rename specific bindings by ID
-	HiddenByID    []string          // suppress specific bindings from the hint bar
-	ExtraBindings any               // engine-specific extras (set via bubbletea options)
+	Default       int
+	PageSize      int
+	Loop          bool
+	ShowHints     bool
+	Hints         []string
+	RelabelByID   map[string]string
+	HiddenByID    []string
+	ExtraBindings any // engine-specific extras (set via bubbletea options)
 }
 
 // WithLiveListDefault sets the initial cursor position.
@@ -292,22 +278,20 @@ func WithLiveListLoop(v bool) LiveListOption {
 	return func(c *LiveListConfig) { c.Loop = v }
 }
 
-// WithLiveListShowHints toggles rendering the prompt's built-in key
-// hints below the rows. Off by default — wizard flows render hints
-// externally and must not set this.
+// WithLiveListShowHints renders the prompt's Hints() bar below the
+// rows. Off by default — must not be set inside a wizard step.
 func WithLiveListShowHints(v bool) LiveListOption {
 	return func(c *LiveListConfig) { c.ShowHints = v }
 }
 
-// WithLiveListHints overrides the hint strings entirely (when ShowHints
-// is on). Replaces ALL hints. Use WithLiveListRelabel for per-binding
-// rename instead.
+// WithLiveListHints replaces all hint strings. For per-binding rename
+// use WithLiveListRelabel.
 func WithLiveListHints(hints ...string) LiveListOption {
 	return func(c *LiveListConfig) { c.Hints = hints }
 }
 
-// WithLiveListRelabel renames a single binding's hint by its stable ID.
-// Same ID space as Select (navigate, select, esc, exit, …).
+// WithLiveListRelabel renames a binding's hint by its ID; same ID
+// space as Select (navigate, select, esc, exit, …).
 func WithLiveListRelabel(id, label string) LiveListOption {
 	return func(c *LiveListConfig) {
 		if c.RelabelByID == nil {
@@ -317,8 +301,8 @@ func WithLiveListRelabel(id, label string) LiveListOption {
 	}
 }
 
-// WithLiveListHide suppresses one or more bindings from the hint bar
-// by ID. The key still works — only its label is hidden.
+// WithLiveListHide suppresses the listed binding labels from the hint
+// bar; keys still trigger their handlers.
 func WithLiveListHide(ids ...string) LiveListOption {
 	return func(c *LiveListConfig) {
 		c.HiddenByID = append(c.HiddenByID, ids...)
@@ -364,27 +348,20 @@ func WithMaxSelections(n int) MultiSelectOption {
 	return func(c *MultiSelectConfig) { c.Max = n }
 }
 
-// WithMultiSelectShowHints toggles rendering the prompt's built-in key hints
-// below the choices. Off by default — wizard flows render hints externally
-// and must not set this. Use for non-wizard interactive prompts where the
-// wizard composite isn't in play.
+// WithMultiSelectShowHints renders the prompt's Hints() bar below the
+// choices. Off by default — must not be set inside a wizard step.
 func WithMultiSelectShowHints(v bool) MultiSelectOption {
 	return func(c *MultiSelectConfig) { c.ShowHints = v }
 }
 
-// WithMultiSelectHints overrides the hint strings rendered by the hint bar
-// (when ShowHints is on). Useful for localization or shorter labels. Key
-// handling is unaffected — this only changes what's displayed.
-//
-// WithMultiSelectHints replaces ALL hints. For per-binding rename, use
-// WithMultiSelectRelabel. For suppression only, use WithMultiSelectHide.
+// WithMultiSelectHints replaces all hint strings. For per-binding
+// rename use WithMultiSelectRelabel.
 func WithMultiSelectHints(hints ...string) MultiSelectOption {
 	return func(c *MultiSelectConfig) { c.Hints = hints }
 }
 
-// WithMultiSelectRelabel renames a single binding's hint by its stable ID
-// (e.g. "navigate", "toggle", "select-all", "confirm", "esc", "exit").
-// Use for localization without rewriting the full hint set.
+// WithMultiSelectRelabel renames a binding's hint by its ID (navigate,
+// toggle, select-all, confirm, esc, exit). Unknown IDs are ignored.
 func WithMultiSelectRelabel(id, label string) MultiSelectOption {
 	return func(c *MultiSelectConfig) {
 		if c.RelabelByID == nil {
@@ -394,8 +371,8 @@ func WithMultiSelectRelabel(id, label string) MultiSelectOption {
 	}
 }
 
-// WithMultiSelectHide suppresses one or more bindings from the hint bar
-// by ID. The key still works — only its label is hidden.
+// WithMultiSelectHide suppresses the listed binding labels from the
+// hint bar; keys still trigger their handlers.
 func WithMultiSelectHide(ids ...string) MultiSelectOption {
 	return func(c *MultiSelectConfig) {
 		c.HiddenByID = append(c.HiddenByID, ids...)

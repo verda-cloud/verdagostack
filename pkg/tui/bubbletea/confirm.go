@@ -32,8 +32,8 @@ type confirmModel struct {
 	bindings    []KeyBinding[confirmModel]
 }
 
-// DefaultConfirmBindings returns the canonical binding set for the
-// confirm prompt. Stable IDs: "yes-no", "confirm", "esc", "exit".
+// DefaultConfirmBindings returns a fresh copy of the canonical
+// binding set. Stable IDs: yes-no, confirm, esc, exit.
 func DefaultConfirmBindings() []KeyBinding[confirmModel] {
 	return []KeyBinding[confirmModel]{
 		{
@@ -51,7 +51,7 @@ func DefaultConfirmBindings() []KeyBinding[confirmModel] {
 					m.decided = true
 					return tea.Quit, true
 				}
-				return nil, false // unrecognized printable — let later bindings see it (none claim)
+				return nil, false // unrecognized printable; no later binding claims it
 			},
 		},
 		{
@@ -101,7 +101,8 @@ func newConfirmModel(prompt string, cfg tui.ConfirmConfig) confirmModel {
 	}
 }
 
-// WithConfirmAddBindings prepends extra bindings to the default set.
+// WithConfirmAddBindings prepends extras so they outrank the default
+// catch-all matchers. See WithSelectAddBindings for semantics.
 func WithConfirmAddBindings(extras ...KeyBinding[confirmModel]) tui.ConfirmOption {
 	return func(c *tui.ConfirmConfig) {
 		existing, _ := c.ExtraBindings.([]KeyBinding[confirmModel])
@@ -123,7 +124,7 @@ func (m confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// Hints derives confirm-specific key hints from the resolved bindings.
+// Hints derives key hints from the resolved bindings.
 func (m confirmModel) Hints() []string {
 	return HintsFor(&m, m.bindings)
 }

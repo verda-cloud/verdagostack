@@ -36,10 +36,9 @@ type textInputModel struct {
 	bindings    []KeyBinding[textInputModel]
 }
 
-// DefaultTextInputBindings returns the canonical binding set.
-// Stable IDs: "submit", "esc", "exit". A hidden "pristine-clear"
-// binding runs on the first printable keystroke and is not part of
-// the public surface.
+// DefaultTextInputBindings returns a fresh copy of the canonical
+// binding set. Stable IDs: submit, esc, exit. An unlisted
+// pristine-clear binding runs once on the first printable keystroke.
 func DefaultTextInputBindings() []KeyBinding[textInputModel] {
 	return []KeyBinding[textInputModel]{
 		{
@@ -76,9 +75,10 @@ func DefaultTextInputBindings() []KeyBinding[textInputModel] {
 			},
 		},
 		{
-			// Hidden pass-through that clears the pre-filled default on
-			// the first printable keystroke, before the textinput bubble
-			// receives the event. Always passes the event through.
+			// Clears the pre-filled default on the first printable
+			// keystroke so the user's input replaces it instead of
+			// appending. Always returns stop=false: textInput.Update
+			// must still see the key to insert it.
 			ID:    "pristine-clear",
 			Match: func(_ tea.KeyPressMsg) bool { return true },
 			Label: func(*textInputModel) string { return "" },
@@ -89,13 +89,14 @@ func DefaultTextInputBindings() []KeyBinding[textInputModel] {
 						m.textInput.SetValue("")
 					}
 				}
-				return nil, false // never claims — falls through to textInput.Update
+				return nil, false
 			},
 		},
 	}
 }
 
-// WithTextInputAddBindings prepends extra bindings to the default set.
+// WithTextInputAddBindings prepends extras so they outrank the defaults.
+// See WithSelectAddBindings for semantics.
 func WithTextInputAddBindings(extras ...KeyBinding[textInputModel]) tui.TextInputOption {
 	return func(c *tui.TextInputConfig) {
 		existing, _ := c.ExtraBindings.([]KeyBinding[textInputModel])
@@ -146,7 +147,7 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// Hints derives text-input-specific key hints from the resolved bindings.
+// Hints derives key hints from the resolved bindings.
 func (m textInputModel) Hints() []string {
 	return HintsFor(&m, m.bindings)
 }

@@ -45,19 +45,10 @@ type multiSelectModel struct {
 	err         string
 }
 
-// DefaultMultiSelectBindings returns the canonical binding set powering
-// both dispatch (Update) and labels (Hints).
-//
-// Stable IDs (for WithMultiSelectRelabel / WithMultiSelectHide):
-//   - "navigate"          ↑/↓
-//   - "vim-up", "vim-down" k/j when filter is empty (hidden labels)
-//   - "toggle"            space
-//   - "select-all"        ctrl+a
-//   - "filter-type"       type to filter (catch-all printable)
-//   - "confirm"           enter
-//   - "esc"               esc — dynamic label: "esc clear filter" / hintEscBack
-//   - "filter-backspace"  backspace (hidden label)
-//   - "exit"              ctrl+c
+// DefaultMultiSelectBindings returns a fresh copy of the canonical
+// binding set. Stable IDs for WithMultiSelectRelabel / Hide: navigate,
+// vim-up, vim-down, toggle, select-all, filter-type, confirm, esc,
+// filter-backspace, exit.
 func DefaultMultiSelectBindings() []KeyBinding[multiSelectModel] {
 	return []KeyBinding[multiSelectModel]{
 		{
@@ -76,7 +67,9 @@ func DefaultMultiSelectBindings() []KeyBinding[multiSelectModel] {
 		{
 			ID:    "vim-up",
 			Match: MatchRune('k'),
-			Label: func(*multiSelectModel) string { return "" }, // hidden
+			Label: func(*multiSelectModel) string { return "" },
+			// j/k navigate when filter is empty; otherwise pass through
+			// so filter-type appends the key to the filter.
 			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 				if m.filter != "" {
 					return nil, false
@@ -88,7 +81,7 @@ func DefaultMultiSelectBindings() []KeyBinding[multiSelectModel] {
 		{
 			ID:    "vim-down",
 			Match: MatchRune('j'),
-			Label: func(*multiSelectModel) string { return "" }, // hidden
+			Label: func(*multiSelectModel) string { return "" },
 			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 				if m.filter != "" {
 					return nil, false
@@ -174,7 +167,7 @@ func DefaultMultiSelectBindings() []KeyBinding[multiSelectModel] {
 		{
 			ID:    "filter-backspace",
 			Match: MatchKey(tea.KeyBackspace),
-			Label: func(*multiSelectModel) string { return "" }, // hidden
+			Label: func(*multiSelectModel) string { return "" },
 			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 				if len(m.filter) > 0 {
 					_, size := utf8.DecodeLastRuneInString(m.filter)
@@ -196,8 +189,8 @@ func DefaultMultiSelectBindings() []KeyBinding[multiSelectModel] {
 	}
 }
 
-// WithMultiSelectAddBindings prepends extra bindings, giving them
-// priority over the defaults. See WithSelectAddBindings for semantics.
+// WithMultiSelectAddBindings prepends extras so they outrank the default
+// catch-all matchers. See WithSelectAddBindings for full semantics.
 func WithMultiSelectAddBindings(extras ...KeyBinding[multiSelectModel]) tui.MultiSelectOption {
 	return func(c *tui.MultiSelectConfig) {
 		existing, _ := c.ExtraBindings.([]KeyBinding[multiSelectModel])
@@ -323,9 +316,8 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// Hints returns the multiselect hint bar entries. A non-nil customHints
-// (from WithMultiSelectHints) overrides everything; otherwise hints
-// derive from the resolved binding set via HintsFor.
+// Hints returns the hint bar entries. customHints (from WithMultiSelectHints)
+// wins; otherwise hints derive from the binding set via HintsFor.
 func (m multiSelectModel) Hints() []string {
 	if m.customHints != nil {
 		return m.customHints

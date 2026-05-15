@@ -38,11 +38,9 @@ type KeyBinding struct {
 }
 
 // DefaultKeyBindings returns the default wizard key bindings.
-//
-// The Ctrl+C binding has no Label: the active prompt's Hints() already
-// advertises "ctrl+c exit", and the composite hint bar concatenates prompt
-// hints with wizard labels without dedup. An empty Label keeps the action
-// wired up while letting the prompt own the universal-key hint text.
+// The Ctrl+C binding's Label is empty so the prompt's Hints() owns
+// the "ctrl+c exit" display — the composite concatenates without
+// dedup, and a label here would duplicate it.
 func DefaultKeyBindings() []KeyBinding {
 	return []KeyBinding{
 		{Key: KeyPattern{Code: 'c', Mod: tea.ModCtrl}, Action: ActionExit, Label: ""},

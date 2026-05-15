@@ -41,18 +41,9 @@ type selectModel struct {
 	interrupted bool // true for Ctrl+C (hard cancel), false for Esc (soft cancel)
 }
 
-// DefaultSelectBindings returns the canonical binding set powering both
-// dispatch (Update) and labels (Hints). Returns a fresh slice; callers
-// can wrap or extend it.
-//
-// Stable IDs (for WithSelectRelabel / WithSelectHide):
-//   - "navigate"          ↑/↓
-//   - "vim-up", "vim-down" k/j when filter is empty (hidden labels)
-//   - "filter-type"       type to filter (catch-all printable)
-//   - "select"            enter
-//   - "esc"               esc — dynamic label: "esc clear filter" / hintEscBack
-//   - "filter-backspace"  backspace (hidden label)
-//   - "exit"              ctrl+c
+// DefaultSelectBindings returns a fresh copy of the canonical binding
+// set. Stable IDs for WithSelectRelabel / WithSelectHide: navigate,
+// vim-up, vim-down, filter-type, select, esc, filter-backspace, exit.
 func DefaultSelectBindings() []KeyBinding[selectModel] {
 	return []KeyBinding[selectModel]{
 		{
@@ -71,10 +62,12 @@ func DefaultSelectBindings() []KeyBinding[selectModel] {
 		{
 			ID:    "vim-up",
 			Match: MatchRune('k'),
-			Label: func(*selectModel) string { return "" }, // hidden
+			Label: func(*selectModel) string { return "" },
+			// j/k navigate when filter is empty; otherwise pass through so
+			// filter-type appends the key to the filter.
 			Handle: func(m *selectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 				if m.filter != "" {
-					return nil, false // fall through to filter-type
+					return nil, false
 				}
 				m.moveUp()
 				return nil, true
@@ -83,7 +76,7 @@ func DefaultSelectBindings() []KeyBinding[selectModel] {
 		{
 			ID:    "vim-down",
 			Match: MatchRune('j'),
-			Label: func(*selectModel) string { return "" }, // hidden
+			Label: func(*selectModel) string { return "" },
 			Handle: func(m *selectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 				if m.filter != "" {
 					return nil, false
@@ -136,7 +129,7 @@ func DefaultSelectBindings() []KeyBinding[selectModel] {
 		{
 			ID:    "filter-backspace",
 			Match: MatchKey(tea.KeyBackspace),
-			Label: func(*selectModel) string { return "" }, // hidden
+			Label: func(*selectModel) string { return "" },
 			Handle: func(m *selectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 				if len(m.filter) > 0 {
 					_, size := utf8.DecodeLastRuneInString(m.filter)
@@ -158,15 +151,11 @@ func DefaultSelectBindings() []KeyBinding[selectModel] {
 	}
 }
 
-// WithSelectAddBindings prepends extra bindings, giving them priority
-// over the defaults. Extras dispatch (and display) before the default
-// catch-alls — e.g. add a '?' help binding without it being swallowed
-// by the type-to-filter handler.
-//
-// This option lives in the bubbletea package because KeyBinding[selectModel]
-// references an unexported type — only in-package or generic-aware callers
-// can construct one. Use WithSelectRelabel/WithSelectHide for label-only
-// changes from external code.
+// WithSelectAddBindings prepends extras so they outrank the default
+// catch-all matchers (e.g. a '?' help binding won't be swallowed by
+// filter-type). KeyBinding[selectModel] references an unexported type,
+// so only in-package callers can construct one — external code uses
+// WithSelectRelabel / WithSelectHide for label-only changes.
 func WithSelectAddBindings(extras ...KeyBinding[selectModel]) tui.SelectOption {
 	return func(c *tui.SelectConfig) {
 		existing, _ := c.ExtraBindings.([]KeyBinding[selectModel])
@@ -254,10 +243,8 @@ func (m selectModel) Init() tea.Cmd { return nil }
 
 func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(GoBackMsg); ok {
-		// Standalone mode (no wizard composite to intercept) — quit so
-		// Prompter.Select can observe m.aborted and return context.Canceled.
-		// In wizard mode the composite handles GoBackMsg before it reaches
-		// the prompt, so this branch never fires.
+		// Standalone mode quit: wizard composite intercepts GoBackMsg
+		// before forwarding, so this branch fires only outside a wizard.
 		return m, tea.Quit
 	}
 	key, ok := msg.(tea.KeyPressMsg)
@@ -328,9 +315,8 @@ func (m selectModel) visibleRange() (int, int) {
 	return start, end
 }
 
-// Hints returns the select hint bar entries. A non-nil customHints
-// (from WithHints) overrides everything; otherwise hints derive from
-// the resolved binding set via HintsFor, which honors dynamic labels.
+// Hints returns the hint bar entries. customHints (from WithHints)
+// wins; otherwise hints derive from the binding set via HintsFor.
 func (m selectModel) Hints() []string {
 	if m.customHints != nil {
 		return m.customHints

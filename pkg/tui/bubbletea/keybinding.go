@@ -20,47 +20,34 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// KeyBinding pairs a key matcher with its display label and handler.
-// Generic in the model type so handlers can mutate model state directly.
-//
-// The label is a function of the current model state, enabling
-// state-aware hint text (e.g. "esc clear filter" when a filter is
-// active, "esc back" otherwise). An empty label hides the entry from
-// the hint bar; the handler still runs.
+// KeyBinding pairs a matcher with a state-aware label and handler.
+// Generic over M so handlers mutate state directly; empty Label hides
+// the entry from the hint bar without disabling Handle.
 type KeyBinding[M any] struct {
-	// ID is a stable identifier for selective overrides via
-	// configuration (relabel/hide/replace). Keep it short and kebab-case.
+	// Stable kebab-case identifier for relabel/hide overrides.
 	ID string
 
-	// Match returns true if the key event triggers this binding.
-	// Pure function of the message — should not inspect model state.
+	// Pure function of msg; must not inspect model state.
 	Match func(tea.KeyPressMsg) bool
 
-	// Label returns the hint text for the current model state. Empty
-	// string hides the entry from the hint bar. Pure function — no
-	// side effects.
+	// Dynamic hint text; "" hides this entry.
 	Label func(*M) string
 
-	// Handle runs the binding. Returns a tea.Cmd to issue (or nil)
-	// and a "stop" flag — true means this Update tick is complete
-	// and no further bindings should be tried. Return (nil, false)
-	// to pass the event to the next matching binding.
+	// Returns (cmd, stop). stop=false falls through to next matching binding.
 	Handle func(*M, tea.KeyPressMsg) (tea.Cmd, bool)
 }
 
-// MatchKey returns a Match that fires when msg.Code equals any of the
-// given key codes. Pass bubbletea's named constants (tea.KeyUp,
-// tea.KeyEnter, …) or rune literals.
+// MatchKey matches any of the given key codes. bubbletea v2's named
+// key constants (KeyUp, KeyEnter, …) are typed rune.
 func MatchKey(codes ...rune) func(tea.KeyPressMsg) bool {
 	return func(msg tea.KeyPressMsg) bool {
 		return slices.Contains(codes, msg.Code)
 	}
 }
 
-// MatchRune returns a Match for a printable rune optionally constrained
-// by a modifier. MatchRune('c', tea.ModCtrl) matches Ctrl+C.
-// With no modifier argument, the binding fires only when no modifier is
-// held (so MatchRune('k') won't fire on Ctrl+K).
+// MatchRune matches r, optionally constrained by mod. With no mod
+// the binding fires only when no modifier is held — MatchRune('k')
+// won't match Ctrl+K.
 func MatchRune(r rune, mod ...tea.KeyMod) func(tea.KeyPressMsg) bool {
 	var required tea.KeyMod
 	for _, m := range mod {
@@ -77,22 +64,15 @@ func MatchRune(r rune, mod ...tea.KeyMod) func(tea.KeyPressMsg) bool {
 	}
 }
 
-// MatchText returns a Match that fires on any key event carrying
-// printable text (msg.Text != ""). Useful as a catch-all for
-// type-to-filter style inputs. Order this binding after more specific
-// rune matchers so they get first claim.
+// MatchText fires on any key event carrying printable text. Order after
+// specific rune matchers so they get first claim.
 func MatchText() func(tea.KeyPressMsg) bool {
 	return func(msg tea.KeyPressMsg) bool { return msg.Text != "" }
 }
 
-// Dispatch iterates bindings in order and invokes the first matching
-// Handle that returns stop=true. Returns that handler's tea.Cmd and
-// true; returns (nil, false) if no binding claims the event.
-//
-// A handler can choose to "pass through" by returning (nil, false)
-// from its Handle even when its Match fires — useful when state
-// matters (e.g. a vim 'k' binding that only navigates when the
-// filter is empty).
+// Dispatch returns the cmd of the first matching binding whose Handle
+// returns stop=true. A handler may return (nil, false) to fall through
+// to the next matching binding even when its Match fired.
 func Dispatch[M any](m *M, bindings []KeyBinding[M], msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	for _, b := range bindings {
 		if b.Match == nil || b.Handle == nil {
@@ -109,8 +89,7 @@ func Dispatch[M any](m *M, bindings []KeyBinding[M], msg tea.KeyPressMsg) (tea.C
 	return nil, false
 }
 
-// HintsFor returns non-empty labels from the binding set for the given
-// model state, preserving declaration order. Used to power Hints().
+// HintsFor returns non-empty Label values in declaration order.
 func HintsFor[M any](m *M, bindings []KeyBinding[M]) []string {
 	out := make([]string, 0, len(bindings))
 	for _, b := range bindings {
@@ -124,9 +103,9 @@ func HintsFor[M any](m *M, bindings []KeyBinding[M]) []string {
 	return out
 }
 
-// ApplyBindingOverrides returns a new binding slice with relabels
-// applied (by ID) and hidden IDs filtered to empty-label closures.
-// Defaults that don't appear in overrides pass through unchanged.
+// ApplyBindingOverrides returns a copy of bindings with per-ID relabels
+// applied and hidden IDs replaced by empty-label closures. The input
+// slice is not mutated.
 func ApplyBindingOverrides[M any](bindings []KeyBinding[M], relabels map[string]string, hidden []string) []KeyBinding[M] {
 	if len(relabels) == 0 && len(hidden) == 0 {
 		return bindings

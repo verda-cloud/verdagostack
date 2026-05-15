@@ -33,8 +33,8 @@ type passwordModel struct {
 	bindings    []KeyBinding[passwordModel]
 }
 
-// DefaultPasswordBindings returns the canonical binding set.
-// Stable IDs: "submit", "esc", "exit".
+// DefaultPasswordBindings returns a fresh copy of the canonical
+// binding set. Stable IDs: submit, esc, exit.
 func DefaultPasswordBindings() []KeyBinding[passwordModel] {
 	return []KeyBinding[passwordModel]{
 		{
@@ -97,7 +97,7 @@ func (m passwordModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// Hints derives password-specific key hints from the resolved bindings.
+// Hints derives key hints from the resolved bindings.
 func (m passwordModel) Hints() []string {
 	return HintsFor(&m, m.bindings)
 }

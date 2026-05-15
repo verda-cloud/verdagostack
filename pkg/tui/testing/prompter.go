@@ -124,13 +124,10 @@ func (p *Prompter) MultiSelect(_ context.Context, _ string, _ []string, _ ...tui
 	return v, nil
 }
 
-// LiveList returns the next queued index and drains the updates channel
-// in the background so producers don't block on send. Updates are
-// discarded — tests that need to assert on update content should drive
-// the model directly rather than through this fake.
-//
-// The drain goroutine exits on ctx.Done or channel close; no drain is
-// spawned when updates is nil.
+// LiveList returns the next queued index. The updates channel (if
+// non-nil) is drained in the background so producers don't block;
+// drained values are discarded. Tests asserting on update behavior
+// should drive the model directly instead of going through this fake.
 func (p *Prompter) LiveList(ctx context.Context, _ string, _ []tui.LiveRow, updates <-chan tui.LiveListUpdate, _ ...tui.LiveListOption) (int, error) {
 	if updates != nil {
 		go func() {
