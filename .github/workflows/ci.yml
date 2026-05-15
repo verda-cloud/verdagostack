@@ -18,7 +18,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25.9"
+          go-version: "1.25.10"
           cache: true
 
       - name: Add Go bin to PATH
@@ -41,7 +41,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25.9"
+          go-version: "1.25.10"
           cache: true
 
       - name: Verify license headers
@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: ["1.25.9"]
+        go-version: ["1.25.10"]
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -78,7 +78,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25.9"
+          go-version: "1.25.10"
           cache: true
 
       - name: Build
@@ -95,7 +95,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25.9"
+          go-version: "1.25.10"
           cache: true
 
       - name: Add Go bin to PATH
@@ -124,7 +124,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25.9"
+          go-version: "1.25.10"
           cache: true
 
       - name: Check go mod tidy
@@ -147,7 +147,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25.9"
+          go-version: "1.25.10"
           cache: true
 
       - name: Add Go bin to PATH
