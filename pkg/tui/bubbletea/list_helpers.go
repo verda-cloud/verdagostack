@@ -38,9 +38,11 @@ func visibleWindow(total, cursor, pageSize int) (int, int) {
 	return start, end
 }
 
-// refilter rebuilds matched from choices using filter. The old matched
-// slice is reused when non-empty to avoid allocation. Returns the new
-// matched slice; caller must reset cursor to 0.
+// refilter rebuilds matched from choices using filter. With a non-empty
+// filter the passed-in slice is truncated and reused to avoid allocation;
+// with an empty filter a fresh full-length slice is allocated (every
+// index matches, so there is nothing to reuse). Returns the new matched
+// slice; caller must reset cursor to 0.
 func refilter(filter string, choices []string, matched []int) []int {
 	if filter == "" {
 		matched = make([]int, len(choices))

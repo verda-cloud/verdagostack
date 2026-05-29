@@ -304,6 +304,33 @@ func TestLiveList_DefaultHintsOrder(t *testing.T) {
 	}
 }
 
+// A late update that arrives after Enter (chosen) must not panic in
+// View, even when it would narrow the active filter to zero matches.
+// bubbletea drains queued msgs after tea.Quit, so a pumped update can
+// land between Enter and teardown.
+func TestLiveList_NoPanicOnUpdateAfterChosen(t *testing.T) {
+	m := newLL(makeLiveRows("alpha", "beta"))
+	// Filter down to just the alpha row.
+	for _, r := range "alpha" {
+		m = llRune(m, r)
+	}
+	if len(m.matched) != 1 {
+		t.Fatalf("setup: expected 1 match for filter 'alpha', got %d", len(m.matched))
+	}
+	m = llKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.chosen {
+		t.Fatal("setup: Enter should choose")
+	}
+	// Late update renames alpha so the active filter "alpha" no longer
+	// matches it → refilter would empty matched.
+	m = llSendUpdate(m, "alpha", "zzz", nil)
+	// Must not panic.
+	view := m.View().Content
+	if view == "" {
+		t.Fatal("expected non-empty view after chosen")
+	}
+}
+
 // --- Prompter-level (full integration) tests ---
 
 // "Channel closed before selection" — picker still selectable until
