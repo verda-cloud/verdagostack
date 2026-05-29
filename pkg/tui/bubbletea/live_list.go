@@ -131,6 +131,12 @@ func (m liveListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Standalone mode quit; wizard composite intercepts before this.
 		return m, tea.Quit
 	case liveListUpdateMsg:
+		if m.chosen {
+			// Selection is locked in; bubbletea may still drain pumped
+			// updates before teardown. Applying one here would refilter
+			// and could empty matched, panicking View's chosen branch.
+			return m, nil
+		}
 		idx, ok := m.keyIndex[v.Key]
 		if !ok {
 			return m, nil

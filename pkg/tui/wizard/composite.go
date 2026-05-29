@@ -96,6 +96,10 @@ func (m compositeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.prompt != nil {
 			updated, cmd := m.prompt.Update(msg)
 			m.prompt = updated.(bubbletea.PromptModel)
+			// Re-read hints: prompt labels can be dynamic (e.g. esc flips
+			// to "clear filter" once filtering), so a one-time snapshot at
+			// setPrompt goes stale.
+			m.hintBar.promptHints = m.prompt.Hints()
 			// Check if prompt completed.
 			if val, done := m.prompt.Result(); done {
 				m.resultCh <- promptResult{value: val, action: ActionNone}

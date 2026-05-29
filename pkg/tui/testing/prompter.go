@@ -128,6 +128,11 @@ func (p *Prompter) MultiSelect(_ context.Context, _ string, _ []string, _ ...tui
 // non-nil) is drained in the background so producers don't block;
 // drained values are discarded. Tests asserting on update behavior
 // should drive the model directly instead of going through this fake.
+//
+// Lifecycle contract: because the fake returns immediately, the drain
+// goroutine outlives the call. Callers passing a non-nil updates channel
+// MUST either cancel ctx or close updates so the goroutine can exit;
+// otherwise it leaks for the lifetime of the test binary.
 func (p *Prompter) LiveList(ctx context.Context, _ string, _ []tui.LiveRow, updates <-chan tui.LiveListUpdate, _ ...tui.LiveListOption) (int, error) {
 	if updates != nil {
 		go func() {

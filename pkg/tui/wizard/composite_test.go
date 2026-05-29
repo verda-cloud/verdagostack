@@ -164,6 +164,37 @@ func TestComposite_HintBar_HonorsPromptOverride(t *testing.T) {
 	}
 }
 
+// TestComposite_HintBar_RefreshesOnFilter verifies the composite hint
+// bar reflects dynamic prompt-hint labels as the prompt's state changes.
+// The select esc binding flips "esc back" → "esc clear filter" once a
+// filter is active; the composite must re-read Hints() per update rather
+// than snapshotting once at setPrompt.
+func TestComposite_HintBar_RefreshesOnFilter(t *testing.T) {
+	resultCh := make(chan promptResult, 1)
+	cfg := tui.ResolveSelectConfig(nil)
+	prompt := bubbletea.NewSelectPrompt("Pick", []string{"alpha", "beta"}, cfg)
+
+	m := newCompositeModel(DefaultKeyBindings(), nil, resultCh)
+	m.setPrompt(prompt)
+
+	view := m.View().Content
+	if !strings.Contains(view, "esc back") {
+		t.Fatalf("setup: expected 'esc back' before filtering, got:\n%s", view)
+	}
+
+	// Type a character to start a filter.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updated.(compositeModel)
+
+	view = m.View().Content
+	if !strings.Contains(view, "esc clear filter") {
+		t.Errorf("hint bar did not refresh after filtering, got:\n%s", view)
+	}
+	if strings.Contains(view, "esc back") {
+		t.Errorf("stale 'esc back' label still present after filtering, got:\n%s", view)
+	}
+}
+
 func TestComposite_ShowPromptMsg_SwapsPrompt(t *testing.T) {
 	resultCh := make(chan promptResult, 1)
 
