@@ -496,6 +496,23 @@ func TestMultiSelectModel_MaxErrorOverride(t *testing.T) {
 	}
 }
 
+func TestMultiSelectModel_MaxErrorOverride_ViaToggleAll(t *testing.T) {
+	// select-all (ctrl+a) is a separate code path from space-toggle; it must
+	// honor the override too.
+	m := newMS([]string{"Apple", "Banana", "Cherry"},
+		func(c *tui.MultiSelectConfig) { c.Max = 2 },
+		func(c *tui.MultiSelectConfig) {
+			c.MaxError = func(max int) string { return fmt.Sprintf("cap is %d", max) }
+		},
+	)
+
+	m = msCtrl(m, 'a') // tries to select all 3, hits max at 2
+
+	if m.err != "cap is 2" {
+		t.Errorf("toggleAll path: expected overridden max error, got %q", m.err)
+	}
+}
+
 func TestMultiSelectModel_MinErrorDefaultWhenUnset(t *testing.T) {
 	m := newMS([]string{"Apple", "Banana", "Cherry"}, func(c *tui.MultiSelectConfig) { c.Min = 2 })
 
@@ -504,6 +521,18 @@ func TestMultiSelectModel_MinErrorDefaultWhenUnset(t *testing.T) {
 
 	if !strings.Contains(m.err, "at least 2 selections required") {
 		t.Errorf("expected default min error, got %q", m.err)
+	}
+}
+
+func TestMultiSelectModel_MaxErrorDefaultWhenUnset(t *testing.T) {
+	m := newMS([]string{"Apple", "Banana", "Cherry"}, func(c *tui.MultiSelectConfig) { c.Max = 1 })
+
+	m = msKey(m, tea.KeyPressMsg{Code: tea.KeySpace})
+	m = msKey(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = msKey(m, tea.KeyPressMsg{Code: tea.KeySpace}) // rejected — over max
+
+	if !strings.Contains(m.err, "maximum 1 selections allowed") {
+		t.Errorf("expected default max error, got %q", m.err)
 	}
 }
 
