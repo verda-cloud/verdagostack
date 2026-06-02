@@ -21,7 +21,10 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/verda-cloud/verdagostack/pkg/tui"
+	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
 	tuitesting "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 )
 
@@ -1839,5 +1842,30 @@ func TestEngine_LoaderReceivesStatusAndStore(t *testing.T) {
 	v, ok := engine.Store().Get("loaded")
 	if !ok || v != true {
 		t.Error("loader should be able to write to store")
+	}
+}
+
+// TestEngine_MultiSelectMinErrorPlumbed verifies that Step.MinError reaches
+// the multiselect model built by the engine, replacing the default
+// validation message for a Required multi-select.
+func TestEngine_MultiSelectMinErrorPlumbed(t *testing.T) {
+	engine := newTestEngine(nil)
+	step := Step{
+		Name:     "regions",
+		Prompt:   MultiSelectPrompt,
+		Required: true,
+		MinError: func(min int) string { return fmt.Sprintf("choose %d+ region(s)", min) },
+	}
+	choices := []Choice{{Label: "us", Value: "us"}, {Label: "eu", Value: "eu"}}
+
+	model := engine.buildPromptModel(step, choices, false)
+
+	// Press Enter with nothing selected: Required enforces min=1, so the
+	// confirm handler fires the (now custom) min-error message.
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	view := updated.(bubbletea.PromptModel).View().Content
+
+	if !strings.Contains(view, "choose 1+ region(s)") {
+		t.Errorf("expected wizard MinError override in view, got %q", view)
 	}
 }

@@ -36,6 +36,8 @@ type multiSelectModel struct {
 	loop        bool
 	min         int
 	max         int
+	minErr      func(min int) string // resolved: caller override or library default
+	maxErr      func(max int) string // resolved: caller override or library default
 	showHints   bool
 	customHints []string                       // nil = derive from bindings
 	bindings    []KeyBinding[multiSelectModel] // resolved (defaults + overrides + extras)
@@ -104,7 +106,7 @@ func DefaultMultiSelectBindings() []KeyBinding[multiSelectModel] {
 					m.err = ""
 				} else {
 					if m.max > 0 && len(m.selected) >= m.max {
-						m.err = fmt.Sprintf("maximum %d selections allowed", m.max)
+						m.err = m.maxErr(m.max)
 					} else {
 						m.selected[idx] = true
 						m.err = ""
@@ -138,7 +140,7 @@ func DefaultMultiSelectBindings() []KeyBinding[multiSelectModel] {
 			Label: func(*multiSelectModel) string { return "enter confirm" },
 			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 				if m.min > 0 && len(m.selected) < m.min {
-					m.err = fmt.Sprintf("at least %d selections required", m.min)
+					m.err = m.minErr(m.min)
 					return nil, true
 				}
 				m.done = true
@@ -213,6 +215,18 @@ func newMultiSelectModel(prompt string, choices []string, cfg tui.MultiSelectCon
 	for i := range choices {
 		matched[i] = i
 	}
+	minErr := cfg.MinError
+	if minErr == nil {
+		minErr = func(min int) string {
+			return fmt.Sprintf("at least %d selections required — press space to select", min)
+		}
+	}
+	maxErr := cfg.MaxError
+	if maxErr == nil {
+		maxErr = func(max int) string {
+			return fmt.Sprintf("maximum %d selections allowed", max)
+		}
+	}
 	defaults := ApplyBindingOverrides(DefaultMultiSelectBindings(), cfg.RelabelByID, cfg.HiddenByID)
 	var bindings []KeyBinding[multiSelectModel]
 	if extras, ok := cfg.ExtraBindings.([]KeyBinding[multiSelectModel]); ok && len(extras) > 0 {
@@ -231,6 +245,8 @@ func newMultiSelectModel(prompt string, choices []string, cfg tui.MultiSelectCon
 		loop:        cfg.Loop,
 		min:         cfg.Min,
 		max:         cfg.Max,
+		minErr:      minErr,
+		maxErr:      maxErr,
 		showHints:   cfg.ShowHints,
 		customHints: cfg.Hints,
 		bindings:    bindings,
@@ -280,7 +296,7 @@ func (m *multiSelectModel) toggleAll() {
 	} else {
 		for _, idx := range m.matched {
 			if m.max > 0 && len(m.selected) >= m.max {
-				m.err = fmt.Sprintf("maximum %d selections allowed", m.max)
+				m.err = m.maxErr(m.max)
 				return
 			}
 			m.selected[idx] = true

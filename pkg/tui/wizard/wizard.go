@@ -59,6 +59,13 @@ type Step struct {
 	IsSet       func() bool // Returns true if value was provided via flag/config.
 	Value       func() any  // Returns the current value when IsSet is true. Propagates to collected map.
 	DependsOn   []string
+
+	// MinError customizes the "minimum selections" validation message for
+	// MultiSelectPrompt steps. The func receives the enforced minimum (1
+	// for Required steps). nil uses the library default. Ignored by other
+	// prompt types. Useful to replace the grammatically awkward default
+	// ("at least 1 selections required") on required multi-selects.
+	MinError func(min int) string
 }
 
 // Flow defines a complete wizard execution graph.
