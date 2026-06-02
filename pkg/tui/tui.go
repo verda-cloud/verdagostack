@@ -408,6 +408,13 @@ type EditorConfig struct {
 	Default  string
 	FileExt  string // file extension hint for syntax highlighting
 	ShowHelp bool
+
+	// Hint overrides the affordance text shown in parentheses while
+	// editing (default: "ctrl+d to submit, esc to cancel"). "" = default.
+	Hint string
+	// Summary overrides the post-submit summary (default: "[N lines]").
+	// The func receives the submitted line count. nil = library default.
+	Summary func(lines int) string
 }
 
 // WithEditorDefault sets the initial content in the editor.
@@ -418,4 +425,16 @@ func WithEditorDefault(v string) EditorOption {
 // WithFileExt sets the file extension hint.
 func WithFileExt(ext string) EditorOption {
 	return func(c *EditorConfig) { c.FileExt = ext }
+}
+
+// WithEditorHint overrides the affordance text rendered in parentheses
+// while editing. Passing "" keeps the library default.
+func WithEditorHint(text string) EditorOption {
+	return func(c *EditorConfig) { c.Hint = text }
+}
+
+// WithEditorSummary overrides the summary shown after the user submits.
+// The func receives the line count. nil keeps the library default.
+func WithEditorSummary(fn func(lines int) string) EditorOption {
+	return func(c *EditorConfig) { c.Summary = fn }
 }

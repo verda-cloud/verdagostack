@@ -28,6 +28,8 @@ import (
 type editorModel struct {
 	prompt    string
 	textarea  textarea.Model
+	hint      string                 // resolved: caller override or library default
+	summary   func(lines int) string // resolved: caller override or library default
 	submitted bool
 	aborted   bool
 }
@@ -38,9 +40,20 @@ func newEditorModel(prompt string, cfg tui.EditorConfig) editorModel {
 	ta.ShowLineNumbers = true
 	ta.Focus()
 
+	hint := cfg.Hint
+	if hint == "" {
+		hint = "ctrl+d to submit, esc to cancel"
+	}
+	summary := cfg.Summary
+	if summary == nil {
+		summary = func(lines int) string { return fmt.Sprintf("[%d lines]", lines) }
+	}
+
 	return editorModel{
 		prompt:   prompt,
 		textarea: ta,
+		hint:     hint,
+		summary:  summary,
 	}
 }
 
@@ -67,9 +80,9 @@ func (m editorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m editorModel) View() tea.View {
 	if m.submitted {
 		lines := strings.Count(m.textarea.Value(), "\n") + 1
-		return tea.NewView(fmt.Sprintf("? %s [%d lines]\n", m.prompt, lines))
+		return tea.NewView(fmt.Sprintf("? %s %s\n", m.prompt, m.summary(lines)))
 	}
-	return tea.NewView(fmt.Sprintf("? %s (ctrl+d to submit, esc to cancel)\n%s", m.prompt, m.textarea.View()))
+	return tea.NewView(fmt.Sprintf("? %s (%s)\n%s", m.prompt, m.hint, m.textarea.View()))
 }
 
 // Editor implements tui.Prompter.
