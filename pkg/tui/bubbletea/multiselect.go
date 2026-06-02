@@ -138,7 +138,7 @@ func DefaultMultiSelectBindings() []KeyBinding[multiSelectModel] {
 			Label: func(*multiSelectModel) string { return "enter confirm" },
 			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 				if m.min > 0 && len(m.selected) < m.min {
-					m.err = fmt.Sprintf("at least %d selections required", m.min)
+					m.err = fmt.Sprintf("at least %d selections required — press space to select", m.min)
 					return nil, true
 				}
 				m.done = true
