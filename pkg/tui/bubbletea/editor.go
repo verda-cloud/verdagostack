@@ -29,6 +29,7 @@ type editorModel struct {
 	prompt    string
 	textarea  textarea.Model
 	hint      string                 // resolved: caller override or library default
+	showHint  bool                   // false = suppress the affordance line (WithEditorNoHint)
 	summary   func(lines int) string // resolved: caller override or library default
 	submitted bool
 	aborted   bool
@@ -53,6 +54,7 @@ func newEditorModel(prompt string, cfg tui.EditorConfig) editorModel {
 		prompt:   prompt,
 		textarea: ta,
 		hint:     hint,
+		showHint: !cfg.NoHint,
 		summary:  summary,
 	}
 }
@@ -81,6 +83,9 @@ func (m editorModel) View() tea.View {
 	if m.submitted {
 		lines := strings.Count(m.textarea.Value(), "\n") + 1
 		return tea.NewView(fmt.Sprintf("? %s %s\n", m.prompt, m.summary(lines)))
+	}
+	if !m.showHint {
+		return tea.NewView(fmt.Sprintf("? %s\n%s", m.prompt, m.textarea.View()))
 	}
 	return tea.NewView(fmt.Sprintf("? %s (%s)\n%s", m.prompt, m.hint, m.textarea.View()))
 }

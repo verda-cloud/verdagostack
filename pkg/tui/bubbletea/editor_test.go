@@ -44,6 +44,23 @@ func TestEditorModel_HintOverride(t *testing.T) {
 	}
 }
 
+func TestEditorModel_NoHint(t *testing.T) {
+	m := newEd(func(c *tui.EditorConfig) { c.NoHint = true })
+	if strings.Contains(m.View().Content, "(") {
+		t.Errorf("expected no affordance parentheses, got %q", m.View().Content)
+	}
+}
+
+func TestEditorModel_NoHintBeatsHint(t *testing.T) {
+	m := newEd(func(c *tui.EditorConfig) {
+		c.Hint = "should not show"
+		c.NoHint = true
+	})
+	if strings.Contains(m.View().Content, "should not show") {
+		t.Errorf("NoHint should take precedence over Hint, got %q", m.View().Content)
+	}
+}
+
 func TestEditorModel_DefaultSummary(t *testing.T) {
 	m := newEd(func(c *tui.EditorConfig) { c.Default = "a\nb\nc" })
 	m.submitted = true

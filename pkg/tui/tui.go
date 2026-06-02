@@ -412,6 +412,9 @@ type EditorConfig struct {
 	// Hint overrides the affordance text shown in parentheses while
 	// editing (default: "ctrl+d to submit, esc to cancel"). "" = default.
 	Hint string
+	// NoHint suppresses the affordance line entirely (no parentheses).
+	// Takes precedence over Hint.
+	NoHint bool
 	// Summary overrides the post-submit summary (default: "[N lines]").
 	// The func receives the submitted line count. nil = library default.
 	Summary func(lines int) string
@@ -428,9 +431,16 @@ func WithFileExt(ext string) EditorOption {
 }
 
 // WithEditorHint overrides the affordance text rendered in parentheses
-// while editing. Passing "" keeps the library default.
+// while editing. Passing "" keeps the library default; use
+// WithEditorNoHint to suppress the affordance entirely.
 func WithEditorHint(text string) EditorOption {
 	return func(c *EditorConfig) { c.Hint = text }
+}
+
+// WithEditorNoHint suppresses the affordance line entirely (no
+// parentheses are rendered). Takes precedence over WithEditorHint.
+func WithEditorNoHint() EditorOption {
+	return func(c *EditorConfig) { c.NoHint = true }
 }
 
 // WithEditorSummary overrides the summary shown after the user submits.
