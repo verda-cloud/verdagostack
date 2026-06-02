@@ -517,6 +517,9 @@ func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) b
 		if step.Required {
 			opts = append(opts, tui.WithMinSelections(1))
 		}
+		if step.MinError != nil {
+			opts = append(opts, tui.WithMinSelectionsError(step.MinError))
+		}
 		if step.Default != nil {
 			col := e.store.Collected()
 			if defVals, ok := step.Default(col).([]string); ok && len(defVals) > 0 {
