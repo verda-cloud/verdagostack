@@ -326,6 +326,11 @@ type MultiSelectConfig struct {
 	RelabelByID   map[string]string // override individual binding labels by ID
 	HiddenByID    []string          // suppress these binding labels from the hint bar
 	ExtraBindings any               // engine-specific extra/replacement bindings (set via bubbletea options)
+
+	// MinError / MaxError override the validation messages shown when the
+	// selection count is below Min or above Max. nil = library default.
+	MinError func(min int) string
+	MaxError func(max int) string
 }
 
 // WithMultiSelectDefaults sets the default selected indices.
@@ -346,6 +351,20 @@ func WithMinSelections(n int) MultiSelectOption {
 // WithMaxSelections sets the maximum allowed selections.
 func WithMaxSelections(n int) MultiSelectOption {
 	return func(c *MultiSelectConfig) { c.Max = n }
+}
+
+// WithMinSelectionsError overrides the message shown when the user
+// confirms with fewer than Min selections. The func receives the
+// configured minimum. nil (the default) uses the library message.
+func WithMinSelectionsError(fn func(min int) string) MultiSelectOption {
+	return func(c *MultiSelectConfig) { c.MinError = fn }
+}
+
+// WithMaxSelectionsError overrides the message shown when the user
+// tries to select more than Max items. The func receives the
+// configured maximum. nil (the default) uses the library message.
+func WithMaxSelectionsError(fn func(max int) string) MultiSelectOption {
+	return func(c *MultiSelectConfig) { c.MaxError = fn }
 }
 
 // WithMultiSelectShowHints renders the prompt's Hints() bar below the

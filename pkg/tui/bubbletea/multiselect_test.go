@@ -15,6 +15,7 @@
 package bubbletea
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -459,6 +460,50 @@ func TestMultiSelectModel_EnterRejectsIfBelowMin(t *testing.T) {
 	}
 	if m.err == "" {
 		t.Error("expected error about minimum selections")
+	}
+}
+
+func TestMultiSelectModel_MinErrorOverride(t *testing.T) {
+	m := newMS([]string{"Apple", "Banana", "Cherry"},
+		func(c *tui.MultiSelectConfig) { c.Min = 2 },
+		func(c *tui.MultiSelectConfig) {
+			c.MinError = func(min int) string { return fmt.Sprintf("pick %d, friend", min) }
+		},
+	)
+
+	m = msKey(m, tea.KeyPressMsg{Code: tea.KeySpace}) // one selection
+	m = msKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if m.err != "pick 2, friend" {
+		t.Errorf("expected overridden min error, got %q", m.err)
+	}
+}
+
+func TestMultiSelectModel_MaxErrorOverride(t *testing.T) {
+	m := newMS([]string{"Apple", "Banana", "Cherry"},
+		func(c *tui.MultiSelectConfig) { c.Max = 1 },
+		func(c *tui.MultiSelectConfig) {
+			c.MaxError = func(max int) string { return fmt.Sprintf("only %d allowed!", max) }
+		},
+	)
+
+	m = msKey(m, tea.KeyPressMsg{Code: tea.KeySpace}) // first
+	m = msKey(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = msKey(m, tea.KeyPressMsg{Code: tea.KeySpace}) // second — rejected
+
+	if m.err != "only 1 allowed!" {
+		t.Errorf("expected overridden max error, got %q", m.err)
+	}
+}
+
+func TestMultiSelectModel_MinErrorDefaultWhenUnset(t *testing.T) {
+	m := newMS([]string{"Apple", "Banana", "Cherry"}, func(c *tui.MultiSelectConfig) { c.Min = 2 })
+
+	m = msKey(m, tea.KeyPressMsg{Code: tea.KeySpace})
+	m = msKey(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if !strings.Contains(m.err, "at least 2 selections required") {
+		t.Errorf("expected default min error, got %q", m.err)
 	}
 }
 
