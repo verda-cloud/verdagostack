@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func TestNewOTelOptions_Defaults(t *testing.T) {
@@ -84,6 +85,32 @@ func TestApply_NoopMode(t *testing.T) {
 	}
 	if providers.meterProvider != nil {
 		t.Error("meterProvider should be nil in noop mode")
+	}
+}
+
+func TestBuildResource_ReadsAttributesFromEnvironment(t *testing.T) {
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment.name=staging,k8s.cluster.name=ml-staging,service.name=ignored")
+
+	opts := &OTelOptions{ServiceName: "test-service"}
+	res, err := opts.buildResource(context.Background())
+	if err != nil {
+		t.Fatalf("buildResource failed: %v", err)
+	}
+
+	wants := map[attribute.Key]string{
+		"deployment.environment.name": "staging",
+		"k8s.cluster.name":            "ml-staging",
+		"service.name":                "test-service",
+	}
+	for key, want := range wants {
+		got, ok := res.Set().Value(key)
+		if !ok {
+			t.Errorf("resource attribute %q is missing", key)
+			continue
+		}
+		if got.AsString() != want {
+			t.Errorf("resource attribute %q = %q, want %q", key, got.AsString(), want)
+		}
 	}
 }
 
