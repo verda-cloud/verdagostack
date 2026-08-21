@@ -107,6 +107,7 @@ func (o *OTelOptions) Apply(ctx context.Context) (*Providers, error) {
 
 func (o *OTelOptions) buildResource(ctx context.Context) (*resource.Resource, error) {
 	return resource.New(ctx,
+		resource.WithFromEnv(),
 		resource.WithAttributes(semconv.ServiceName(o.ServiceName)),
 		resource.WithProcessRuntimeDescription(),
 		resource.WithTelemetrySDK(),
